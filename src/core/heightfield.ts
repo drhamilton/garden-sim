@@ -10,7 +10,7 @@
 // The shadow pass marches rays across the `obstacle` field; lit/shadow state
 // is evaluated at each tile's `surface`.
 
-import type { Garden } from './types';
+import type { Footprint, Garden } from './types';
 import { LEVEL_HEIGHT_M, tileIndex } from './types';
 
 export interface Heightfield {
@@ -25,36 +25,60 @@ export interface Heightfield {
 }
 
 export function buildHeightfield(garden: Garden): Heightfield {
-  const { width, depth, groundLevels, objects } = garden;
-  const size = width * depth;
-  const surfaceM = new Float64Array(size);
-  const obstacleM = new Float64Array(size);
+  const { width, depth } = garden;
+  const surfaceM = groundSurface(garden);
+  // Objects rise above the ground, so obstacles start level with the surface.
+  const obstacleM = Float64Array.from(surfaceM);
+  raiseObstaclesForObjects(obstacleM, garden);
 
-  for (let i = 0; i < size; i++) {
-    const level = groundLevels[i] ?? 0;
-    const h = level * LEVEL_HEIGHT_M;
-    surfaceM[i] = h;
-    obstacleM[i] = h;
+  return { width, depth, surfaceM, obstacleM, maxObstacleM: maxOf(obstacleM) };
+}
+
+/** Ground surface height (metres) for every tile, from its discrete level. */
+function groundSurface(garden: Garden): Float64Array {
+  const { width, depth, groundLevels } = garden;
+  const surfaceM = new Float64Array(width * depth);
+  for (let i = 0; i < surfaceM.length; i++) {
+    surfaceM[i] = (groundLevels[i] ?? 0) * LEVEL_HEIGHT_M;
   }
+  return surfaceM;
+}
 
-  let maxObstacleM = 0;
-  for (let i = 0; i < size; i++) {
-    if (obstacleM[i]! > maxObstacleM) maxObstacleM = obstacleM[i]!;
+/** Raises the obstacle height under each object's footprint to the object's top. */
+function raiseObstaclesForObjects(
+  obstacleM: Float64Array,
+  garden: Garden,
+): void {
+  for (const obj of garden.objects) {
+    const topM = obj.baseLevel * LEVEL_HEIGHT_M + obj.heightM;
+    forEachTileInFootprint(obj.footprint, garden.width, garden.depth, (idx) => {
+      if (topM > obstacleM[idx]!) obstacleM[idx] = topM;
+    });
   }
+}
 
-  for (const obj of objects) {
-    const top = obj.baseLevel * LEVEL_HEIGHT_M + obj.heightM;
-    const { x, y, width: w, depth: d } = obj.footprint;
-    for (let oy = y; oy < y + d; oy++) {
-      if (oy < 0 || oy >= depth) continue;
-      for (let ox = x; ox < x + w; ox++) {
-        if (ox < 0 || ox >= width) continue;
-        const idx = tileIndex(width, ox, oy);
-        if (top > obstacleM[idx]!) obstacleM[idx] = top;
-        if (top > maxObstacleM) maxObstacleM = top;
-      }
+/** Invokes `visit` with the row-major index of every in-bounds tile a footprint covers. */
+function forEachTileInFootprint(
+  footprint: Footprint,
+  width: number,
+  depth: number,
+  visit: (idx: number) => void,
+): void {
+  const { x, y, width: w, depth: d } = footprint;
+  for (let ty = y; ty < y + d; ty++) {
+    if (ty < 0 || ty >= depth) continue;
+    for (let tx = x; tx < x + w; tx++) {
+      if (tx < 0 || tx >= width) continue;
+      visit(tileIndex(width, tx, ty));
     }
   }
+}
 
-  return { width, depth, surfaceM, obstacleM, maxObstacleM };
+/** The largest value in a (non-negative) height array. */
+function maxOf(values: Float64Array): number {
+  let max = 0;
+  for (const value of values) {
+    if (value > max) max = value;
+  }
+  return max;
 }

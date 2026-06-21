@@ -6,7 +6,13 @@
 // can assert on it directly — the core→renderer boundary is verifiable without
 // any engine.
 
-import type { Footprint, Garden, GardenObjectKind, SunPosition } from './types';
+import type {
+  Footprint,
+  Garden,
+  GardenObject,
+  GardenObjectKind,
+  SunPosition,
+} from './types';
 import { LEVEL_HEIGHT_M, TILE_SIZE_M, tileIndex } from './types';
 import type { LitGrid } from './shadow';
 
@@ -53,36 +59,41 @@ export function buildScene(
   litGrid: LitGrid,
   sun: SunPosition,
 ): SceneDescription {
-  const { width, depth } = garden;
+  return {
+    width: garden.width,
+    depth: garden.depth,
+    tileSizeM: TILE_SIZE_M,
+    tiles: sceneTiles(garden, litGrid),
+    objects: garden.objects.map(toSceneObject),
+    camera: { kind: 'orthographic', northRotation: garden.northRotation },
+    sun,
+  };
+}
 
+/** One renderable tile per grid cell, carrying its position, elevation, and lit state. */
+function sceneTiles(garden: Garden, litGrid: LitGrid): SceneTile[] {
+  const { width, depth, groundLevels } = garden;
   const tiles: SceneTile[] = [];
   for (let y = 0; y < depth; y++) {
     for (let x = 0; x < width; x++) {
       const idx = tileIndex(width, x, y);
-      const level = garden.groundLevels[idx] ?? 0;
       tiles.push({
         x,
         y,
-        elevationM: level * LEVEL_HEIGHT_M,
+        elevationM: (groundLevels[idx] ?? 0) * LEVEL_HEIGHT_M,
         lit: litGrid.lit[idx] === 1,
       });
     }
   }
+  return tiles;
+}
 
-  const objects: SceneObject[] = garden.objects.map((obj) => ({
+/** Translates a garden object into its renderable form (levels → metres). */
+function toSceneObject(obj: GardenObject): SceneObject {
+  return {
     kind: obj.kind,
     footprint: obj.footprint,
     baseElevationM: obj.baseLevel * LEVEL_HEIGHT_M,
     heightM: obj.heightM,
-  }));
-
-  return {
-    width,
-    depth,
-    tileSizeM: TILE_SIZE_M,
-    tiles,
-    objects,
-    camera: { kind: 'orthographic', northRotation: garden.northRotation },
-    sun,
   };
 }
