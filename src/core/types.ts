@@ -1,0 +1,75 @@
+// Core domain types for the garden sun simulation.
+//
+// Pure data — no DOM, no renderer, no I/O. These types define the garden
+// model (1ft tiles, discrete ground levels, light-blocking objects) and the
+// sun's position in the sky. All of it is serializable.
+
+/** Side length of one grid tile in metres (1 ft — the square-foot gardening unit). */
+export const TILE_SIZE_M = 0.3048;
+
+/** Height in metres of one discrete ground-level step (e.g. lawn → raised deck). */
+export const LEVEL_HEIGHT_M = 0.3;
+
+/**
+ * The sun's position in the sky, in radians.
+ *
+ * Azimuth is a compass bearing measured clockwise from true north:
+ * N = 0, E = π/2, S = π, W = 3π/2. Elevation is the angle above the
+ * horizon: 0 at the horizon, π/2 at the zenith, negative below the horizon
+ * (night).
+ */
+export interface SunPosition {
+  azimuth: number;
+  elevation: number;
+}
+
+/** An axis-aligned rectangular footprint on the tile grid, in tile units. */
+export interface Footprint {
+  /** Column of the south-west corner (min x). */
+  x: number;
+  /** Row of the south-west corner (min y). */
+  y: number;
+  /** Extent along x, in tiles (≥ 1). */
+  width: number;
+  /** Extent along y, in tiles (≥ 1). */
+  depth: number;
+}
+
+/** The kinds of light-blocking object the v1 editor can place. */
+export type GardenObjectKind = 'building' | 'fence' | 'tree';
+
+/** An object placed on the grid that blocks sunlight. */
+export interface GardenObject {
+  kind: GardenObjectKind;
+  footprint: Footprint;
+  /** Discrete ground level the object's base sits on. */
+  baseLevel: number;
+  /** Height above its base, in metres (free/continuous, not quantized). */
+  heightM: number;
+}
+
+/**
+ * A garden model: a rectangular grid of tiles with discrete ground levels,
+ * a set of light-blocking objects, a real-world location, and an orientation.
+ *
+ * `groundLevels` is row-major: the level of tile (x, y) is at index
+ * `y * width + x`.
+ *
+ * `northRotation` is the compass bearing (radians, clockwise from true north)
+ * of the grid's +y axis — i.e. how far the model is rotated away from having
+ * +y point at true north.
+ */
+export interface Garden {
+  width: number;
+  depth: number;
+  groundLevels: readonly number[];
+  objects: readonly GardenObject[];
+  northRotation: number;
+  latitude: number;
+  longitude: number;
+}
+
+/** Row-major index of tile (x, y) in a grid of the given width. */
+export function tileIndex(width: number, x: number, y: number): number {
+  return y * width + x;
+}
