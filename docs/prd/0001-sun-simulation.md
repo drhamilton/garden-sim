@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-I want to plan where to put plants in my real garden, and the single biggest factor I can't easily reason about is **sunlight**. Throughout the day and across the seasons, the sun moves, and buildings, fences, and trees throw shade that shifts with it. Standing in the garden I can't see how much sun a given spot actually gets over a whole day in June versus the whole growing season, so I can't confidently decide which spots are best for sun-loving plants and which are reliably shady. I need a way to model my garden virtually and *see* where the sun lands over time, so I can find the optimal sunny and shady spots before I commit a plant to the ground.
+I want to plan where to put plants in my real garden, and the single biggest factor I can't easily reason about is **sunlight**. Throughout the day and across the seasons, the sun moves, and buildings, fences, and trees throw shade that shifts with it. Standing in the garden I can't see how much sun a given spot actually gets over a whole day in June versus the whole growing season, so I can't confidently decide which spots are best for sun-loving plants and which are reliably shady. I need a way to model my garden virtually and _see_ where the sun lands over time, so I can find the optimal sunny and shady spots before I commit a plant to the ground.
 
 ## Solution
 
@@ -10,7 +10,7 @@ A TypeScript web app that simulates sunlight on a virtual model of my real garde
 
 I build a top-down/isometric model of the garden on a 1ft tile grid (matching square-foot gardening): I paint ground tiles and raise them into discrete levels (lawn at ground level, a raised deck a level up), and I place objects — buildings, fences, trees — each with a footprint, height, and light transmittance. I set the garden's real-world latitude/longitude and rotate the model so it points to true north.
 
-The app then renders the garden isometrically and computes, using a real astronomical solar model, where the sun lands. I can **scrub through the time of day** and watch shadows move in real time. I can also pick a **time window** — a single day, a season, or a custom range like my whole growing season — and the app produces a **sun-hours heatmap**: each tile colored by the average sunlight hours per day it receives over that window, with the sunniest and shadiest tiles highlighted. Trees cast *dappled* (partial) shade via their transmittance, and deciduous trees can let more light through in their leaf-off season — so the heatmap reflects reality, not worst-case shade.
+The app then renders the garden isometrically and computes, using a real astronomical solar model, where the sun lands. I can **scrub through the time of day** and watch shadows move in real time. I can also pick a **time window** — a single day, a season, or a custom range like my whole growing season — and the app produces a **sun-hours heatmap**: each tile colored by the average sunlight hours per day it receives over that window, with the sunniest and shadiest tiles highlighted. Trees cast _dappled_ (partial) shade via their transmittance, and deciduous trees can let more light through in their leaf-off season — so the heatmap reflects reality, not worst-case shade.
 
 ## User Stories
 
@@ -48,6 +48,7 @@ The app then renders the garden isometrically and computes, using a real astrono
 **Architecture — hexagonal (ports & adapters).** A pure, framework-agnostic TypeScript **simulation core** holds all domain logic. Everything else is an adapter behind a port. This is the load-bearing decision; it makes the core headlessly testable and makes the renderer, UI framework, solar library, and worker independently swappable.
 
 **Core domain model.**
+
 - The garden is a grid of **1ft × 1ft tiles** (square-foot gardening unit; also the future unit for plant placement).
 - **Ground levels are discrete**: each tile column has a stepped base elevation (lawn = 0, deck = +1 step, etc.). No continuous terrain/gradients.
 - **Objects** have a footprint (on the grid), a **base elevation**, a **height in meters (free/continuous, not quantized)**, and a **transmittance** value in [0,1] (0 = opaque, 1 = fully transparent).
@@ -57,16 +58,18 @@ The app then renders the garden isometrically and computes, using a real astrono
 **Solar model.** Real astronomical sun position (azimuth + elevation) computed from **latitude/longitude + date + time** via a standard solar-position algorithm (e.g. SunCalc / NOAA), behind a **solar-position port**. Garden **orientation (true north)** is a settable rotation stored with the garden. Location is a stored lat/long field (no geocoding search in v1).
 
 **Sunlight computation.** For a given sun position, each tile is evaluated by casting a ray toward the sun across the tile heightfield; if blocked by a taller column/object the tile is shaded. **Transmittance makes this fractional**: a tile under 50%-transmittance canopy accrues 0.5 sun-hours for that lit step. Two modes share this core:
+
 - **Instantaneous**: lit/shadow (and fractional) state at the current time.
 - **Aggregate**: integrate across a window → **average sun-hours per day** per tile (the heatmap). A cumulative total is at most an internal detail; the reported number is average/day.
 
-**Time & windows.** Intra-day integration steps the sun on a tunable interval (generous default, e.g. ~15 min). Multi-day windows **sample representative days** (e.g. ~weekly) and average, since day-to-day solar change is small. Windows: presets (single day, month, season) plus a **custom date range**; "growing season" is just a user-set custom range (not hardcoded). All sampling parameters are tunable config with sensible defaults — precision is explicitly *not* the priority.
+**Time & windows.** Intra-day integration steps the sun on a tunable interval (generous default, e.g. ~15 min). Multi-day windows **sample representative days** (e.g. ~weekly) and average, since day-to-day solar change is small. Windows: presets (single day, month, season) plus a **custom date range**; "growing season" is just a user-set custom range (not hardcoded). All sampling parameters are tunable config with sensible defaults — precision is explicitly _not_ the priority.
 
-**Rendering — neutral scene description (port).** The core produces a **render-agnostic scene description**: a serializable list of renderable primitives (tiles at positions/elevations, objects as footprints+heights, per-tile heatmap colors) plus camera/orientation params. Rendering adapters translate this into their engine. First adapter: **Three.js with an orthographic camera** (isometric look; native height/occlusion handling), kept **imperative and framework-independent** (deliberately *not* react-three-fiber, to preserve renderer swappability). The 3D engine is for display only — quantitative sun-hours are always computed on the heightfield in the core.
+**Rendering — neutral scene description (port).** The core produces a **render-agnostic scene description**: a serializable list of renderable primitives (tiles at positions/elevations, objects as footprints+heights, per-tile heatmap colors) plus camera/orientation params. Rendering adapters translate this into their engine. First adapter: **Three.js with an orthographic camera** (isometric look; native height/occlusion handling), kept **imperative and framework-independent** (deliberately _not_ react-three-fiber, to preserve renderer swappability). The 3D engine is for display only — quantitative sun-hours are always computed on the heightfield in the core.
 
 **App shell.** TypeScript web app. The **UI framework is a driving adapter and is deferred** pending a research spike (React vs Svelte/Vue/Solid). Note: the heavy work is on the canvas and in the worker, not the DOM, so framework perf is largely moot here. The tracer-bullet slice uses **minimal vanilla controls** so it isn't blocked on the framework choice.
 
 **Performance.**
+
 - Design ceiling: **~100×100 tiles (10,000)**.
 - **Scrubbing: 60fps target** (~16ms/frame) — instantaneous shadow pass kept tight (typed arrays for the grid).
 - **Heatmap: <1s for a single day; a few seconds with a progress indicator acceptable for a full season.** Aggregation **offloaded to a Web Worker behind a port**; the core logic stays pure/synchronous and the worker is the off-thread adapter.

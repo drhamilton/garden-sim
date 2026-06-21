@@ -7,6 +7,9 @@ build/
 .vite/
 *.tsbuildinfo
 
+# Test coverage
+coverage/
+
 # Logs
 *.log
 npm-debug.log*
