@@ -5,31 +5,24 @@
 // with the objects array replaced, never mutating the input.
 
 import type {
-  DeciduousRange,
   Footprint,
   Garden,
   GardenObject,
   GardenObjectKind,
 } from './types';
 
-/** Sensible starting height (metres) for a freshly placed object, by kind. */
-const DEFAULT_HEIGHT_M: Record<GardenObjectKind, number> = {
-  building: 3,
-  fence: 1.2,
-  tree: 5,
-};
-
-/** Sensible starting transmittance for a freshly placed object, by kind. */
-const DEFAULT_TRANSMITTANCE: Record<GardenObjectKind, number> = {
-  building: 0,
-  fence: 0,
-  tree: 0.5,
-};
-
-/** Sensible starting leaf-on/leaf-off range for a freshly placed tree. */
-const DEFAULT_DECIDUOUS_RANGE: DeciduousRange = {
-  leafOn: '04-15',
-  leafOff: '10-31',
+/** Sensible starting properties for a freshly placed object, by kind. */
+const KIND_DEFAULTS: Record<
+  GardenObjectKind,
+  Pick<GardenObject, 'heightM' | 'transmittance' | 'deciduousRange'>
+> = {
+  building: { heightM: 3, transmittance: 0 },
+  fence: { heightM: 1.2, transmittance: 0 },
+  tree: {
+    heightM: 5,
+    transmittance: 0.5,
+    deciduousRange: { leafOn: '04-15', leafOff: '10-31' },
+  },
 };
 
 /** Places a new object of `kind` with the given footprint and default properties. */
@@ -42,9 +35,7 @@ export function placeObject(
     kind,
     footprint,
     baseLevel: 0,
-    heightM: DEFAULT_HEIGHT_M[kind],
-    transmittance: DEFAULT_TRANSMITTANCE[kind],
-    ...(kind === 'tree' ? { deciduousRange: DEFAULT_DECIDUOUS_RANGE } : {}),
+    ...KIND_DEFAULTS[kind],
   };
   return { ...garden, objects: [...garden.objects, object] };
 }
