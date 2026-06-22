@@ -81,7 +81,13 @@ export class ThreeOrthographicRenderer implements RendererPort {
   // ---- internals -----------------------------------------------------------
 
   private computeStructureKey(scene: SceneDescription): string {
-    return `${scene.width}x${scene.depth}:${scene.objects.length}:${scene.camera.northRotation}`;
+    const objKey = scene.objects
+      .map(
+        (o) =>
+          `${o.kind}:${o.footprint.x},${o.footprint.y},${o.footprint.width},${o.footprint.depth}:${o.baseElevationM}:${o.heightM}`,
+      )
+      .join('|');
+    return `${scene.width}x${scene.depth}:${scene.camera.northRotation}:${objKey}`;
   }
 
   private rebuild(scene: SceneDescription): void {
