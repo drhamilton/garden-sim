@@ -220,3 +220,55 @@ describe('computeSunFractionGrid — dappled (fractional) shade', () => {
     expect([...grid.fraction]).toEqual([0, 0, 0]);
   });
 });
+
+/**
+ * A tree at column `x` with an opaque trunk from the ground up to `canopyBaseM`
+ * and a transmissive canopy of `transmittance` above it, to a 5 m top.
+ */
+function trunkTree(
+  x: number,
+  canopyBaseM: number,
+  transmittance: number,
+): GardenObject {
+  return {
+    kind: 'tree',
+    footprint: { x, y: 0, width: 1, depth: 1 },
+    baseLevel: 0,
+    heightM: 5,
+    transmittance,
+    canopyBaseM,
+  };
+}
+
+describe('computeSunFractionGrid — mixed transmittance by height (trunk + canopy)', () => {
+  // Tree at x=4 on a width-6 strip; origin tile x=0 is 3.5 tiles west of it, far
+  // enough that a low ray reaches the tree at trunk height and a high ray at
+  // canopy height.
+  const tree = trunkTree(4, 2, 0.5);
+  const lowEast = { azimuth: 90 * DEG, elevation: 15 * DEG };
+  const highEast = { azimuth: 90 * DEG, elevation: 70 * DEG };
+
+  it('blocks a low-sun ray solidly when it passes through the opaque trunk', () => {
+    const fraction = fractionAt(strip(6, [tree]), lowEast);
+    expect(fraction(0)).toBe(0);
+  });
+
+  it('dapples a high-sun ray that passes only through the transmissive canopy', () => {
+    const fraction = fractionAt(strip(6, [tree]), highEast);
+    expect(fraction(0)).toBeCloseTo(0.5);
+  });
+
+  it("accrues the canopy's fraction for a tile directly under the tree", () => {
+    const fraction = fractionAt(strip(6, [tree]), highEast);
+    expect(fraction(4)).toBeCloseTo(0.5);
+  });
+
+  it('leaves uniform-transmittance trees (no trunk) unchanged — still dappled at any sun height', () => {
+    // Same canopy transmittance but no opaque trunk: the low ray is dappled,
+    // not blocked, matching pre-trunk behaviour.
+    const uniform = canopy(4, 0.5);
+    uniform.heightM = 5;
+    const fraction = fractionAt(strip(6, [uniform]), lowEast);
+    expect(fraction(0)).toBeCloseTo(0.5);
+  });
+});

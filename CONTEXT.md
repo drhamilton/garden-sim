@@ -22,6 +22,10 @@ _Avoid_: Obstacle, entity, prop
 The fraction of light a garden object lets through, in [0,1] — 0 = opaque, 1 = fully transparent. A tree canopy at 0.5 passes half the sunlight, so tiles under it accrue fractional (dappled) sun-hours rather than full sun or full shade.
 _Avoid_: Opacity, alpha, density
 
+**Canopy base**:
+The height (metres above an object's base) where its opaque lower part gives way to its transmissive upper part — for a tree, where the opaque trunk meets the dappling canopy. A ray crossing below it is blocked solidly; above it the ray passes the object's transmittance. Omitted means a uniform transmissive column (no trunk). Trunk and canopy share one footprint for now, so a tile directly under the tree dapples through the canopy rather than being trunk-blocked — a narrower trunk footprint is a later refinement.
+_Avoid_: Trunk height, crown base, split height
+
 **Footprint**:
 The axis-aligned rectangle of tiles a garden object occupies, in tile units.
 

@@ -49,6 +49,38 @@ describe('object editor use-cases', () => {
     expect(fenced.objects[0]!.transmittance ?? 0).toBe(0);
   });
 
+  it('gives a freshly placed tree an opaque trunk below its canopy, but not buildings/fences', () => {
+    const tree = placeObject(garden(), 'tree', {
+      x: 0,
+      y: 0,
+      width: 1,
+      depth: 1,
+    });
+    expect(tree.objects[0]!.canopyBaseM).toBeGreaterThan(0);
+    expect(tree.objects[0]!.canopyBaseM!).toBeLessThan(
+      tree.objects[0]!.heightM,
+    );
+
+    const building = placeObject(garden(), 'building', {
+      x: 0,
+      y: 0,
+      width: 1,
+      depth: 1,
+    });
+    expect(building.objects[0]!.canopyBaseM).toBeUndefined();
+  });
+
+  it("updates an object's canopy base height", () => {
+    const placed = placeObject(garden(), 'tree', {
+      x: 0,
+      y: 0,
+      width: 1,
+      depth: 1,
+    });
+    const updated = updateObjectAt(placed, 0, { canopyBaseM: 1.5 });
+    expect(updated.objects[0]!.canopyBaseM).toBe(1.5);
+  });
+
   it('gives a freshly placed tree a default deciduous range, persisted on the model', () => {
     const g = placeObject(garden(), 'tree', { x: 0, y: 0, width: 1, depth: 1 });
     expect(g.objects[0]!.deciduousRange).toBeDefined();
