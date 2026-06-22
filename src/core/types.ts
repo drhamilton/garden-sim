@@ -38,6 +38,16 @@ export interface Footprint {
 /** The kinds of light-blocking object the v1 editor can place. */
 export type GardenObjectKind = 'building' | 'fence' | 'tree';
 
+/**
+ * A deciduous tree's leaf-on/leaf-off date range, as `MM-DD` strings
+ * (inclusive, year-agnostic). Stored on the model but not yet honoured by
+ * the engine — the shadow pass treats every object as opaque regardless.
+ */
+export interface DeciduousRange {
+  leafOn: string;
+  leafOff: string;
+}
+
 /** An object placed on the grid that blocks sunlight. */
 export interface GardenObject {
   kind: GardenObjectKind;
@@ -46,6 +56,14 @@ export interface GardenObject {
   baseLevel: number;
   /** Height above its base, in metres (free/continuous, not quantized). */
   heightM: number;
+  /**
+   * Light transmittance in [0,1] — 0 = opaque, 1 = fully transparent.
+   * Omitted means opaque. Not yet honoured by the shadow pass (every object
+   * is currently treated as opaque regardless of this value).
+   */
+  transmittance?: number;
+  /** Trees only: deciduous leaf-on/leaf-off range. */
+  deciduousRange?: DeciduousRange;
 }
 
 /**
