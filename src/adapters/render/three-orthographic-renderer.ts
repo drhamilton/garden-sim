@@ -18,7 +18,9 @@ import {
   MeshStandardMaterial,
   OrthographicCamera,
   PlaneGeometry,
+  Raycaster,
   Scene,
+  Vector2,
   WebGLRenderer,
 } from 'three';
 import type { RendererPort } from '../../ports';
@@ -26,6 +28,8 @@ import type { SceneDescription, SceneTile } from '../../core';
 
 const LIT_COLOR = new Color(0xf4d35e);
 const SHADOW_COLOR = new Color(0x39465a);
+const INACTIVE_COLOR = new Color(0x1a1f29);
+const INACTIVE_OPACITY = 0.25;
 const OBJECT_COLORS: Record<string, number> = {
   building: 0xb08968,
   fence: 0x9c7a54,
@@ -40,7 +44,11 @@ export class ThreeOrthographicRenderer implements RendererPort {
   private readonly camera: OrthographicCamera;
   private readonly sunLight = new DirectionalLight(0xffffff, 1.6);
   private readonly group = new Group();
+  private readonly raycaster = new Raycaster();
+  private readonly scratchColor = new Color();
   private tileMeshes: Mesh[] = [];
+  /** The grid coordinate each tile mesh stands for, for pointer picking. */
+  private readonly tileCoordByMesh = new Map<Mesh, { x: number; y: number }>();
   private structureKey = '';
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -87,10 +95,14 @@ export class ThreeOrthographicRenderer implements RendererPort {
   private rebuild(scene: SceneDescription): void {
     this.disposeGroup();
     this.tileMeshes = [];
+    this.tileCoordByMesh.clear();
 
     const tileGeometry = new PlaneGeometry(1 - TILE_GAP, 1 - TILE_GAP);
     for (const tile of scene.tiles) {
-      const material = new MeshStandardMaterial({ roughness: 0.95 });
+      const material = new MeshStandardMaterial({
+        roughness: 0.95,
+        transparent: true,
+      });
       this.applyTileAppearance(material, tile);
       const mesh = new Mesh(tileGeometry, material);
       mesh.rotation.x = -Math.PI / 2; // lay flat on the XZ plane
@@ -101,6 +113,7 @@ export class ThreeOrthographicRenderer implements RendererPort {
       );
       this.group.add(mesh);
       this.tileMeshes.push(mesh);
+      this.tileCoordByMesh.set(mesh, { x: tile.x, y: tile.y });
     }
 
     for (const obj of scene.objects) {
@@ -142,9 +155,31 @@ export class ThreeOrthographicRenderer implements RendererPort {
     material: MeshStandardMaterial,
     tile: SceneTile,
   ): void {
-    if (tile.colorHex != null) material.color.set(tile.colorHex);
-    else material.color.copy(tile.lit ? LIT_COLOR : SHADOW_COLOR);
+    material.color.copy(this.baseColorFor(tile));
+    material.opacity = tile.active ? 1 : INACTIVE_OPACITY;
     material.emissiveIntensity = 0;
+  }
+
+  /** The tile's colour ignoring opacity: heatmap colour, lit/shadow, or inactive. */
+  private baseColorFor(tile: SceneTile): Color {
+    if (!tile.active) return INACTIVE_COLOR;
+    if (tile.colorHex != null) return this.scratchColor.set(tile.colorHex);
+    return tile.lit ? LIT_COLOR : SHADOW_COLOR;
+  }
+
+  /** Maps a pointer position in CSS pixels to the grid tile under it. */
+  pickTile(clientX: number, clientY: number): { x: number; y: number } | null {
+    const canvasRect = this.canvas.getBoundingClientRect();
+    // Raycaster.setFromCamera expects the pointer as x/y in [-1, 1] across the
+    // canvas (its "normalized device coordinates"), not CSS pixels.
+    const pointerAsUnitSquareCoords = new Vector2(
+      ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1,
+      -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(pointerAsUnitSquareCoords, this.camera);
+    const hit = this.raycaster.intersectObjects(this.tileMeshes, false)[0];
+    if (!hit || !(hit.object instanceof Mesh)) return null;
+    return this.tileCoordByMesh.get(hit.object) ?? null;
   }
 
   private updateSun(scene: SceneDescription): void {

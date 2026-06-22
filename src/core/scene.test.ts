@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { eraseTile } from './ground-editor';
 import { buildScene } from './scene';
 import { computeLitGrid } from './shadow';
 import type { Garden } from './types';
@@ -88,6 +89,14 @@ describe('buildScene — neutral scene description', () => {
     });
     expect(scene.tileSizeM).toBeCloseTo(TILE_SIZE_M);
     expect(scene.sun).toEqual(sun);
+  });
+
+  it('marks every tile active by default, and erased tiles inactive', () => {
+    const garden = eraseTile(gardenWithBuilding(), 1, 0);
+    const sun = { azimuth: 90 * DEG, elevation: 20 * DEG };
+    const scene = buildScene(garden, computeLitGrid(garden, sun), sun);
+
+    expect(scene.tiles.map((t) => t.active)).toEqual([true, false, true]);
   });
 
   it('produces a JSON-serializable description (no engine types leak in)', () => {

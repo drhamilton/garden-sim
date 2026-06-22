@@ -12,9 +12,11 @@ The first cut of the simulation core packed each operation into one long functio
 **Readability is a first-class goal.** Prefer breaking work into small, named functions that compose, so a caller reads like prose and each step can be understood in isolation. Concretely:
 
 - **Name the steps.** A function's body should read as a sequence (or composition) of named operations, not a wall of inlined arithmetic. `computeLitGrid`'s core is now one line: `!isUnderObject(...) && !rayIsBlocked(...)`.
-- **Name the values.** Avoid one-letter locals for anything non-trivial (`t` → `distance`, `maxT` → `maxDistance`, `tanElevation` → `slope`).
+- **Name the values.** Avoid one-letter locals for anything non-trivial (`t` → `distance`, `maxT` → `maxDistance`, `tanElevation` → `slope`). This isn't limited to single letters: avoid abbreviations generally (`ndc` → `pointerNdc`, `rect` → `canvasRect`) — spell out what the value is, not just enough to type less.
 - **Extract reusable shapes.** Cross-cutting iteration belongs in a named helper (e.g. `forEachTileInFootprint`) rather than being re-inlined.
 - **Declarative for one-shot transforms.** Use `.map`/`.filter`/`.reduce` for small collections built once (e.g. `garden.objects.map(toSceneObject)`).
+- **No boolean-mode parameters.** A function whose behaviour branches on a trailing `boolean` (e.g. `setTileActive(garden, x, y, active)`) reads as noise at the call site (`setTileActive(garden, x, y, false)` — false _what_?). Prefer two named functions (`paintTile`/`eraseTile`) sharing a smaller helper whose own parameters aren't mode switches. A boolean is fine when it's plainly _data_ being written (e.g. `withActiveAt(garden, idx, active)`, analogous to `Array.fill`'s argument) rather than a flag that picks between two behaviours.
+- **One concern per branch.** When a function's conditional is doing two unrelated jobs at once (e.g. picking a colour _and_ picking an opacity in the same if/else-if chain), split it into one small function per concern rather than growing the chain. Each becomes independently readable and testable.
 
 ## Performance carve-out
 
@@ -29,3 +31,4 @@ Rule of thumb: **declarative for small one-shot transforms; imperative-with-name
 
 - Slightly more functions and indirection, paid back in legibility and testability.
 - Reviewers should treat "one big function doing several things with terse names" as a finding, and "functional patterns in the typed-array hot path" as a finding too.
+- Reviewers should also flag abbreviated identifiers, boolean-mode parameters, and multi-concern conditionals as findings — same "readability is a first-class goal" rationale, not new exceptions.
