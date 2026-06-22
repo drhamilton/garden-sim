@@ -25,6 +25,29 @@ describe('SunCalcSolarPosition', () => {
     expect(azimuth * DEG).toBeLessThan(192);
   });
 
+  // Slice 8: editing latitude must meaningfully change the sun's elevation.
+  // At the same instant and longitude, a location farther from the summer-sun
+  // hemisphere sees a lower noon sun: Greenwich (51.5°N) noon is markedly
+  // higher than Tromsø (69.6°N) noon on the same June day.
+  it('lowers the noon sun elevation as latitude moves poleward', () => {
+    const solar = new SunCalcSolarPosition();
+    const noon = new Date('2025-06-21T12:00:00Z');
+    const greenwich = solar.getSunPosition({
+      latitude: 51.4791,
+      longitude: 0,
+      date: noon,
+    });
+    const tromso = solar.getSunPosition({
+      latitude: 69.6492,
+      longitude: 0,
+      date: noon,
+    });
+
+    expect(greenwich.elevation).toBeGreaterThan(tromso.elevation);
+    // A genuine, not marginal, difference — ~18° of latitude ≈ ~18° of sun.
+    expect((greenwich.elevation - tromso.elevation) * DEG).toBeGreaterThan(10);
+  });
+
   it('reports the sun below the horizon at local midnight', () => {
     const solar = new SunCalcSolarPosition();
     const { elevation } = solar.getSunPosition({

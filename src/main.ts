@@ -35,7 +35,7 @@ import { SunCalcSolarPosition, ThreeOrthographicRenderer } from './adapters';
 
 // --- Fixed scene inputs ------------------------------------------------------
 
-const FIXED_LOCATION = { latitude: 51.4791, longitude: 0 }; // Greenwich
+const DEFAULT_LOCATION = { latitude: 51.4791, longitude: 0 }; // Greenwich
 
 // Coordinate system: +x = east, +y = north, (0,0) = SW corner. Grid is 12×12,
 // each tile ≈ 0.3 m. All objects cast shadows northward (sun from S at noon).
@@ -47,8 +47,8 @@ function baseGarden(objects: Garden['objects']): Garden {
     groundLevels: new Array(12 * 12).fill(0),
     objects,
     northRotation: 0,
-    latitude: FIXED_LOCATION.latitude,
-    longitude: FIXED_LOCATION.longitude,
+    latitude: DEFAULT_LOCATION.latitude,
+    longitude: DEFAULT_LOCATION.longitude,
   };
 }
 
@@ -125,13 +125,18 @@ const renderer = new ThreeOrthographicRenderer(canvas);
 /** Current date driving both scrub and heatmap modes. */
 let currentDate = '2025-06-21';
 
+/** The active garden's real-world location, fed to every solar query. */
+function gardenLocation(): { latitude: number; longitude: number } {
+  return { latitude: garden.latitude, longitude: garden.longitude };
+}
+
 /** Sun position for a given date string and fractional hour (UTC). */
 function sunAtHourOnDate(dateStr: string, hour: number): SunPosition {
   const minutes = Math.round(hour * 60);
   const hh = String(Math.floor(minutes / 60)).padStart(2, '0');
   const mm = String(minutes % 60).padStart(2, '0');
   const date = new Date(`${dateStr}T${hh}:${mm}:00Z`);
-  return solar.getSunPosition({ ...FIXED_LOCATION, date });
+  return solar.getSunPosition({ ...gardenLocation(), date });
 }
 
 /** SunAtDateTime adapter for sampleWindow: uses a Date object + fractional hour. */
@@ -141,7 +146,7 @@ const sunAtDateTime: SunAtDateTime = (date, hour) => {
   const mm = String(minutes % 60).padStart(2, '0');
   const isoDate = date.toISOString().slice(0, 10);
   const instant = new Date(`${isoDate}T${hh}:${mm}:00Z`);
-  return solar.getSunPosition({ ...FIXED_LOCATION, date: instant });
+  return solar.getSunPosition({ ...gardenLocation(), date: instant });
 };
 
 function renderAtHour(hour: number): void {
@@ -200,6 +205,7 @@ const sceneBtns = SCENES.map(({ name, description }, i) => {
     activeScene = i;
     garden = SCENES[i]!.garden;
     deselectObject();
+    refreshLocationInputs();
     update();
   });
   return btn;
@@ -519,6 +525,84 @@ datePicker.id = 'garden-date';
 datePicker.value = currentDate;
 datePicker.style.cursor = 'pointer';
 
+// Location & orientation row: editable latitude/longitude and a true-north
+// rotation dial. All three are stored on the active garden and feed the solar
+// queries; changing any of them re-lights the live view (and any heatmap).
+const DEG_PER_RAD = 180 / Math.PI;
+const RAD_PER_DEG = Math.PI / 180;
+
+const locationRow = document.createElement('div');
+locationRow.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;';
+
+const latLabel = document.createElement('label');
+latLabel.append('Lat:');
+const latInput = document.createElement('input');
+latInput.type = 'number';
+latInput.min = '-90';
+latInput.max = '90';
+latInput.step = '0.1';
+latInput.style.width = '6em';
+latLabel.append(latInput);
+
+const lonLabel = document.createElement('label');
+lonLabel.append('Lon:');
+const lonInput = document.createElement('input');
+lonInput.type = 'number';
+lonInput.min = '-180';
+lonInput.max = '180';
+lonInput.step = '0.1';
+lonInput.style.width = '6em';
+lonLabel.append(lonInput);
+
+const northLabel = document.createElement('label');
+northLabel.append('North (°):');
+const northInput = document.createElement('input');
+northInput.type = 'range';
+northInput.min = '0';
+northInput.max = '359';
+northInput.step = '1';
+const northReadout = document.createElement('span');
+northLabel.append(northInput, northReadout);
+
+/** Pushes a partial change to the active garden's location/orientation. */
+function patchGarden(
+  fields: Partial<Pick<Garden, 'latitude' | 'longitude' | 'northRotation'>>,
+): void {
+  garden = { ...garden, ...fields };
+  SCENES[activeScene]!.garden = garden;
+  update();
+}
+
+/** Loads the location/orientation controls from the active garden. */
+function refreshLocationInputs(): void {
+  latInput.value = String(garden.latitude);
+  lonInput.value = String(garden.longitude);
+  const northDeg = Math.round(garden.northRotation * DEG_PER_RAD);
+  northInput.value = String(((northDeg % 360) + 360) % 360);
+  northReadout.textContent = `${northInput.value}°`;
+}
+
+latInput.addEventListener('change', () => {
+  const value = Number(latInput.value);
+  if (Number.isFinite(value) && value >= -90 && value <= 90)
+    patchGarden({ latitude: value });
+});
+
+lonInput.addEventListener('change', () => {
+  const value = Number(lonInput.value);
+  if (Number.isFinite(value) && value >= -180 && value <= 180)
+    patchGarden({ longitude: value });
+});
+
+northInput.addEventListener('input', () => {
+  const deg = Number(northInput.value);
+  northReadout.textContent = `${deg}°`;
+  patchGarden({ northRotation: deg * RAD_PER_DEG });
+});
+
+locationRow.append(latLabel, lonLabel, northLabel);
+
 // Row 3: window preset selector (heatmap mode only)
 const row3 = document.createElement('div');
 row3.style.cssText =
@@ -772,6 +856,7 @@ controls.append(
   propertiesPanel,
   row1,
   row2,
+  locationRow,
   row3,
   row4,
   readout,
@@ -781,4 +866,5 @@ canvas.insertAdjacentElement('afterend', controls);
 highlightActiveGroundTool();
 highlightActiveObjectTool();
 refreshEditorVisibility();
+refreshLocationInputs();
 update();
