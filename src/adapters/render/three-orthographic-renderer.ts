@@ -170,11 +170,13 @@ export class ThreeOrthographicRenderer implements RendererPort {
   /** Maps a pointer position in CSS pixels to the grid tile under it. */
   pickTile(clientX: number, clientY: number): { x: number; y: number } | null {
     const canvasRect = this.canvas.getBoundingClientRect();
-    const pointerNdc = new Vector2(
+    // Raycaster.setFromCamera expects the pointer as x/y in [-1, 1] across the
+    // canvas (its "normalized device coordinates"), not CSS pixels.
+    const pointerAsUnitSquareCoords = new Vector2(
       ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1,
       -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1,
     );
-    this.raycaster.setFromCamera(pointerNdc, this.camera);
+    this.raycaster.setFromCamera(pointerAsUnitSquareCoords, this.camera);
     const hit = this.raycaster.intersectObjects(this.tileMeshes, false)[0];
     if (!hit || !(hit.object instanceof Mesh)) return null;
     return this.tileCoordByMesh.get(hit.object) ?? null;
