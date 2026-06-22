@@ -20,8 +20,14 @@ import type { Garden, SunPosition } from './types';
 /** Default intra-day sampling step, in hours (15 minutes). */
 export const DEFAULT_STEP_HOURS = 0.25;
 
+/** Default interval between representative days when sampling a multi-day window. */
+export const DEFAULT_SAMPLE_INTERVAL_DAYS = 7;
+
 /** Looks up the sun's position a given number of hours into the day. */
 export type SunAt = (hoursIntoDay: number) => SunPosition;
+
+/** Looks up the sun's position for a specific date and time-of-day. */
+export type SunAtDateTime = (date: Date, hoursIntoDay: number) => SunPosition;
 
 /** One intra-day sample: the sun at an instant and the slice of day it covers. */
 export interface DaySample {
@@ -30,17 +36,12 @@ export interface DaySample {
   weightHours: number;
 }
 
-/** Per-tile average sun-hours per day, with the extremes for colour + highlight. */
+/** Per-tile average sun-hours per day. */
 export interface SunHoursGrid {
   width: number;
   depth: number;
   /** Average sun-hours per day, per tile, row-major. */
   hours: Float64Array;
-  minHours: number;
-  maxHours: number;
-  /** Row-major index of the sunniest / shadiest tile. */
-  sunniestIndex: number;
-  shadiestIndex: number;
 }
 
 /**
@@ -83,7 +84,7 @@ export function aggregateSunHours(
     for (let i = 0; i < hours.length; i++) hours[i]! /= dayCount;
   }
 
-  return { width, depth, hours, ...extremes(hours) };
+  return { width, depth, hours };
 }
 
 /** Adds `weightHours` to every tile the shadow pass marks lit for this sun. */
@@ -99,23 +100,44 @@ function accumulateLitTime(
   }
 }
 
-/** The min/max sun-hours and the tiles that hold them. */
-function extremes(hours: Float64Array): {
-  minHours: number;
-  maxHours: number;
-  sunniestIndex: number;
-  shadiestIndex: number;
-} {
-  let sunniestIndex = 0;
-  let shadiestIndex = 0;
-  for (let i = 1; i < hours.length; i++) {
-    if (hours[i]! > hours[sunniestIndex]!) sunniestIndex = i;
-    if (hours[i]! < hours[shadiestIndex]!) shadiestIndex = i;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Samples a multi-day window by picking representative days at `sampleIntervalDays`
+ * intervals and calling `sampleDay` for each. Returns the combined samples and a
+ * `dayCount` equal to the number of representative days — pass both to
+ * `aggregateSunHours` to get average sun-hours per day over the window.
+ */
+export function sampleWindow(
+  startDate: Date,
+  endDate: Date,
+  sunAt: SunAtDateTime,
+  sampleIntervalDays = DEFAULT_SAMPLE_INTERVAL_DAYS,
+  intraStepHours = DEFAULT_STEP_HOURS,
+): { samples: DaySample[]; dayCount: number } {
+  const dates = pickRepresentativeDays(startDate, endDate, sampleIntervalDays);
+  const samples: DaySample[] = [];
+  for (const date of dates) {
+    const sunAtForDay: SunAt = (h) => sunAt(date, h);
+    samples.push(...sampleDay(sunAtForDay, intraStepHours));
   }
-  return {
-    minHours: hours[shadiestIndex] ?? 0,
-    maxHours: hours[sunniestIndex] ?? 0,
-    sunniestIndex,
-    shadiestIndex,
-  };
+  return { samples, dayCount: dates.length };
 }
+
+/** Selects one date every `intervalDays`, starting from `startDate`, up to `endDate`. */
+function pickRepresentativeDays(
+  startDate: Date,
+  endDate: Date,
+  intervalDays: number,
+): Date[] {
+  const dates: Date[] = [];
+  let current = startDate.getTime();
+  const end = endDate.getTime();
+  const step = intervalDays * MS_PER_DAY;
+  while (current <= end) {
+    dates.push(new Date(current));
+    current += step;
+  }
+  return dates;
+}
+

@@ -18,20 +18,10 @@ function gridStrip(hours: number[]): { garden: Garden; grid: SunHoursGrid } {
     latitude: 0,
     longitude: 0,
   };
-  let sunniestIndex = 0;
-  let shadiestIndex = 0;
-  hours.forEach((h, i) => {
-    if (h > hours[sunniestIndex]!) sunniestIndex = i;
-    if (h < hours[shadiestIndex]!) shadiestIndex = i;
-  });
   const grid: SunHoursGrid = {
     width: hours.length,
     depth: 1,
     hours: Float64Array.from(hours),
-    minHours: hours[shadiestIndex]!,
-    maxHours: hours[sunniestIndex]!,
-    sunniestIndex,
-    shadiestIndex,
   };
   return { garden, grid };
 }
@@ -50,17 +40,6 @@ describe('buildHeatmapScene — sun-hours heatmap scene description', () => {
     }
     // The colour ramps with sun-hours: sunnier tiles differ from shadier ones.
     expect(scene.tiles[0]!.colorHex).not.toBe(scene.tiles[2]!.colorHex);
-  });
-
-  it('flags the sunniest and shadiest tiles', () => {
-    const { garden, grid } = gridStrip([2, 9, 5]);
-    const scene = buildHeatmapScene(garden, grid, NOON);
-
-    expect(scene.tiles.map((t) => t.highlight)).toEqual([
-      'shadiest',
-      'sunniest',
-      undefined,
-    ]);
   });
 
   it('handles a uniform grid without dividing by a zero range', () => {
@@ -86,10 +65,6 @@ describe('buildHeatmapScene — sun-hours heatmap scene description', () => {
       width: 2,
       depth: 1,
       hours: Float64Array.from([1, 2]),
-      minHours: 1,
-      maxHours: 2,
-      sunniestIndex: 1,
-      shadiestIndex: 0,
     };
     const scene = buildHeatmapScene(garden, grid, NOON);
 

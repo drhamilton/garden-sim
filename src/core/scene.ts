@@ -17,9 +17,6 @@ import { LEVEL_HEIGHT_M, TILE_SIZE_M, tileIndex } from './types';
 import type { LitGrid } from './shadow';
 import type { SunHoursGrid } from './sun-hours';
 
-/** Which extreme a heatmap tile holds, for the renderer to highlight. */
-export type TileHighlight = 'sunniest' | 'shadiest';
-
 export interface SceneTile {
   x: number;
   y: number;
@@ -30,8 +27,6 @@ export interface SceneTile {
   sunHours?: number;
   /** Heatmap mode: packed 0xRRGGBB heatmap colour, ramped by sun-hours. */
   colorHex?: number;
-  /** Heatmap mode: set on the sunniest / shadiest tile. */
-  highlight?: TileHighlight;
 }
 
 export interface SceneObject {
@@ -75,24 +70,25 @@ export function buildScene(
 
 /**
  * Builds the sun-hours heatmap scene from an aggregated grid. Each tile carries
- * its average sun-hours, a colour ramped across the grid's range, and a flag on
- * the sunniest / shadiest tile. `sun` is a representative position (e.g. solar
- * noon) used only to light the extruded objects so heights still read.
+ * its average sun-hours and a colour ramped across the grid's range. `sun` is a
+ * representative position (e.g. solar noon) used only to light the extruded
+ * objects so heights still read.
  */
 export function buildHeatmapScene(
   garden: Garden,
   grid: SunHoursGrid,
   sun: SunPosition,
 ): SceneDescription {
-  const range = grid.maxHours - grid.minHours;
+  const minHours = Math.min(...grid.hours);
+  const maxHours = Math.max(...grid.hours);
+  const range = maxHours - minHours;
   return sceneFor(garden, sun, (idx) => {
     const sunHours = grid.hours[idx] ?? 0;
-    const fraction = range > EPSILON ? (sunHours - grid.minHours) / range : 1;
+    const fraction = range > EPSILON ? (sunHours - minHours) / range : 1;
     return {
       lit: sunHours > 0,
       sunHours,
       colorHex: heatmapColor(fraction),
-      highlight: highlightFor(grid, idx),
     };
   });
 }
@@ -136,16 +132,6 @@ function sceneTiles(
     }
   }
   return tiles;
-}
-
-/** Marks the sunniest / shadiest tile, or nothing for the rest. */
-function highlightFor(
-  grid: SunHoursGrid,
-  idx: number,
-): TileHighlight | undefined {
-  if (idx === grid.sunniestIndex) return 'sunniest';
-  if (idx === grid.shadiestIndex) return 'shadiest';
-  return undefined;
 }
 
 // Heatmap colour ramp: shadow blue → sun yellow, matching the renderer palette.
