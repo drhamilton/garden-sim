@@ -86,7 +86,7 @@ function renderAtHour(hour: number): void {
 function renderHeatmap(
   startDate: Date,
   endDate: Date,
-): { minHours: number; maxHours: number; dayCount: number } {
+): { minHours: number; maxHours: number } {
   const { samples, dayCount } = sampleWindow(
     startDate,
     endDate,
@@ -96,14 +96,14 @@ function renderHeatmap(
   const grid = aggregateSunHours(garden, samples, dayCount);
   const noonSun = sunAtDateTime(startDate, 12);
   renderer.render(buildHeatmapScene(garden, grid, noonSun));
-  return { minHours: grid.minHours, maxHours: grid.maxHours, dayCount };
+  return { minHours: grid.minHours, maxHours: grid.maxHours };
 }
 
 // --- Minimal vanilla controls ------------------------------------------------
 
 const controls = document.createElement('div');
 controls.style.cssText =
-  'font-family: system-ui, sans-serif; color: #ddd; margin-top: 8px;';
+  'font-family: system-ui, sans-serif; color: #000; margin-top: 8px;';
 
 // Row 1: time-of-day scrub
 const row1 = document.createElement('div');
@@ -136,7 +136,7 @@ const datePicker = document.createElement('input');
 datePicker.type = 'date';
 datePicker.id = 'garden-date';
 datePicker.value = currentDate;
-datePicker.style.cssText = 'color: #111; cursor: pointer;';
+datePicker.style.cursor = 'pointer';
 
 // Row 3: window preset selector (heatmap mode only)
 const row3 = document.createElement('div');
@@ -181,7 +181,7 @@ const customStartPicker = document.createElement('input');
 customStartPicker.type = 'date';
 customStartPicker.id = 'garden-custom-start';
 customStartPicker.value = currentDate;
-customStartPicker.style.cssText = 'color: #111; cursor: pointer;';
+customStartPicker.style.cursor = 'pointer';
 
 const customEndLabel = document.createElement('label');
 customEndLabel.textContent = 'To:';
@@ -193,7 +193,7 @@ customEndPicker.id = 'garden-custom-end';
 customEndPicker.value = addDays(new Date(`${currentDate}T00:00:00Z`), 30)
   .toISOString()
   .slice(0, 10);
-customEndPicker.style.cssText = 'color: #111; cursor: pointer;';
+customEndPicker.style.cursor = 'pointer';
 
 // Readout row
 const readout = document.createElement('div');
@@ -227,14 +227,16 @@ function update(): void {
     const customStart = new Date(`${customStartPicker.value}T00:00:00Z`);
     const customEnd = new Date(`${customEndPicker.value}T00:00:00Z`);
     const { start, end } = windowBounds(activePreset, refDate, customStart, customEnd);
-    const { minHours, maxHours, dayCount } = renderHeatmap(start, end);
+    const { minHours, maxHours } = renderHeatmap(start, end);
     heatmapButton.textContent = 'Scrub the day';
     row3.hidden = false;
     highlightActivePreset();
+    const totalDays =
+      Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
     const rangeStr = formatDateRange(start, end);
-    const sampledDays = `${dayCount} sampled day${dayCount !== 1 ? 's' : ''}`;
+    const spanStr = totalDays === 1 ? '1 day' : `${totalDays} days`;
     readout.textContent =
-      `Avg sun-hours/day over ${rangeStr} (${sampledDays}) — ` +
+      `Avg sun-hours/day over ${rangeStr} (${spanStr}) — ` +
       `sunniest ${maxHours.toFixed(1)}h (gold), shadiest ${minHours.toFixed(1)}h (blue).`;
     return;
   }
