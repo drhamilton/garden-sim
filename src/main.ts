@@ -24,29 +24,80 @@ import { SunCalcSolarPosition, ThreeOrthographicRenderer } from './adapters';
 
 const FIXED_LOCATION = { latitude: 51.4791, longitude: 0 }; // Greenwich
 
-/** A small flat garden with one building and one tree, at ground level. */
-const garden: Garden = {
-  width: 12,
-  depth: 12,
-  groundLevels: new Array(12 * 12).fill(0),
-  objects: [
-    {
-      kind: 'building',
-      footprint: { x: 7, y: 7, width: 3, depth: 2 },
-      baseLevel: 0,
-      heightM: 4,
-    },
-    {
-      kind: 'tree',
-      footprint: { x: 3, y: 3, width: 2, depth: 2 },
-      baseLevel: 0,
-      heightM: 5,
-    },
-  ],
-  northRotation: 0,
-  latitude: FIXED_LOCATION.latitude,
-  longitude: FIXED_LOCATION.longitude,
-};
+// Coordinate system: +x = east, +y = north, (0,0) = SW corner. Grid is 12×12,
+// each tile ≈ 0.3 m. All objects cast shadows northward (sun from S at noon).
+
+function baseGarden(objects: Garden['objects']): Garden {
+  return {
+    width: 12,
+    depth: 12,
+    groundLevels: new Array(12 * 12).fill(0),
+    objects,
+    northRotation: 0,
+    latitude: FIXED_LOCATION.latitude,
+    longitude: FIXED_LOCATION.longitude,
+  };
+}
+
+const SCENES: Array<{ name: string; description: string; garden: Garden }> = [
+  {
+    name: 'Open garden',
+    description: 'No obstacles — shows pure seasonal daylight variation.',
+    garden: baseGarden([]),
+  },
+  {
+    // 2.5 m fence along the entire south edge.
+    // Greenwich noon elevation: winter ~15° → shadow 30 tiles (whole garden);
+    // summer ~62° → shadow 4 tiles. Dramatic N-S seasonal contrast.
+    name: 'South fence',
+    description: '2.5 m fence across the south edge — long winter shadow, short summer shadow.',
+    garden: baseGarden([
+      {
+        kind: 'fence',
+        footprint: { x: 0, y: 0, width: 12, depth: 1 },
+        baseLevel: 0,
+        heightM: 2.5,
+      },
+    ]),
+  },
+  {
+    // Tall building in the SW corner (5×5 tiles, 6 m).
+    // Spring morning: sun rises low in SE → long diagonal shadow sweeps most
+    // of the garden. Summer: sun rises NE and climbs steeply → shadow short
+    // and confined to the NE. Good "spring vs summer" heatmap comparison.
+    name: 'SW corner block',
+    description: '6 m building in SW corner — large spring shadow, retreats in summer.',
+    garden: baseGarden([
+      {
+        kind: 'building',
+        footprint: { x: 0, y: 0, width: 5, depth: 5 },
+        baseLevel: 0,
+        heightM: 6,
+      },
+    ]),
+  },
+  {
+    name: 'Building + tree',
+    description: 'Mixed scene: building in the back, tree in the middle.',
+    garden: baseGarden([
+      {
+        kind: 'building',
+        footprint: { x: 7, y: 7, width: 3, depth: 2 },
+        baseLevel: 0,
+        heightM: 4,
+      },
+      {
+        kind: 'tree',
+        footprint: { x: 3, y: 3, width: 2, depth: 2 },
+        baseLevel: 0,
+        heightM: 5,
+      },
+    ]),
+  },
+];
+
+let activeScene = 0;
+let garden: Garden = SCENES[activeScene]!.garden;
 
 // --- Wiring ------------------------------------------------------------------
 
@@ -104,6 +155,27 @@ function renderHeatmap(
 const controls = document.createElement('div');
 controls.style.cssText =
   'font-family: system-ui, sans-serif; color: #000; margin-top: 8px;';
+
+// Row 0: scene selector
+const row0 = document.createElement('div');
+row0.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+
+const sceneLabel = document.createElement('span');
+sceneLabel.textContent = 'Scene:';
+
+const sceneBtns = SCENES.map(({ name, description }, i) => {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = name;
+  btn.title = description;
+  btn.style.cursor = 'pointer';
+  btn.addEventListener('click', () => {
+    activeScene = i;
+    garden = SCENES[i]!.garden;
+    update();
+  });
+  return btn;
+});
 
 // Row 1: time-of-day scrub
 const row1 = document.createElement('div');
@@ -221,7 +293,14 @@ function highlightActivePreset(): void {
   }
 }
 
+function highlightActiveScene(): void {
+  for (const [i, btn] of sceneBtns.entries()) {
+    btn.style.fontWeight = i === activeScene ? 'bold' : '';
+  }
+}
+
 function update(): void {
+  highlightActiveScene();
   if (mode === 'heatmap') {
     const refDate = new Date(`${currentDate}T00:00:00Z`);
     const customStart = new Date(`${customStartPicker.value}T00:00:00Z`);
@@ -272,12 +351,13 @@ for (const picker of [customStartPicker, customEndPicker]) {
 
 // --- Assemble DOM ------------------------------------------------------------
 
+row0.append(sceneLabel, ...sceneBtns);
 row1.append(slider, timeLabel, heatmapButton);
 row2.append(datePickerLabel, datePicker);
 row3.append(windowLabel, ...presetBtns);
 row4.append(customStartLabel, customStartPicker, customEndLabel, customEndPicker);
 
-controls.append(row1, row2, row3, row4, readout);
+controls.append(row0, row1, row2, row3, row4, readout);
 canvas.insertAdjacentElement('afterend', controls);
 
 update();
