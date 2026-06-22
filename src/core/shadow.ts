@@ -1,28 +1,16 @@
 // Instantaneous shadow pass.
 //
-// Given a garden and a sun position, marks each tile lit or shadowed by
-// casting a ray from the tile surface toward the sun across the heightfield.
-// If a taller column or object blocks the ray before it clears the tallest
-// obstacle, the tile is in shadow.
-//
-// Two passes share this geometry:
-//   computeLitGrid       — binary lit/shadow, every object treated as opaque
-//                          (the instantaneous scrub view).
-//   computeSunFractionGrid — fractional "dappled" light, honouring each
-//                          object's transmittance (the quantitative pass the
-//                          sun-hours heatmap integrates).
+// Given a garden and a sun position, computes per tile the fraction of direct
+// sunlight it receives, by casting a ray from the tile surface toward the sun
+// across the heightfield. An opaque object (or raised ground) blocks the ray
+// entirely; a transmissive object (e.g. a tree canopy) lets a fraction through,
+// so partly-shaded tiles read as dappled. Both the instantaneous scrub view and
+// the sun-hours heatmap are built on this single pass.
 
 import { buildHeightfield } from './heightfield';
 import type { Heightfield } from './heightfield';
 import type { Garden, SunPosition } from './types';
 import { TILE_SIZE_M, tileIndex } from './types';
-
-export interface LitGrid {
-  width: number;
-  depth: number;
-  /** 1 = lit, 0 = shadowed, per tile, row-major. */
-  lit: Uint8Array;
-}
 
 export interface SunFractionGrid {
   width: number;
@@ -69,68 +57,9 @@ function isUnderObject(field: Heightfield, idx: number): boolean {
 }
 
 /**
- * Walks from a tile toward the sun, sub-tile step by step, asking at each cell
- * whether something stands taller than the climbing ray. Returns true the
- * moment the ray is blocked; false if it escapes the grid or out-climbs the
- * tallest obstacle first.
- */
-function rayIsBlocked(
-  field: Heightfield,
-  cx: number,
-  cy: number,
-  ray: SunRay,
-  maxDistance: number,
-): boolean {
-  const { width, depth, surfaceM, obstacleM, maxObstacleM } = field;
-  const startHeight = surfaceM[tileIndex(width, cx, cy)]!;
-  const originX = cx + 0.5;
-  const originY = cy + 0.5;
-
-  for (let distance = STEP; distance <= maxDistance; distance += STEP) {
-    const gx = Math.floor(originX + ray.dx * distance);
-    const gy = Math.floor(originY + ray.dy * distance);
-
-    // Ray left the garden without hitting anything → not blocked.
-    if (gx < 0 || gx >= width || gy < 0 || gy >= depth) return false;
-
-    const rayHeight = startHeight + distance * TILE_SIZE_M * ray.slope;
-    // Ray has risen above everything that could block it → not blocked.
-    if (rayHeight > maxObstacleM) return false;
-
-    if (obstacleM[tileIndex(width, gx, gy)]! > rayHeight + EPSILON) return true;
-  }
-  return false;
-}
-
-export function computeLitGrid(garden: Garden, sun: SunPosition): LitGrid {
-  const { width, depth } = garden;
-  const lit = new Uint8Array(width * depth);
-
-  // Sun below the horizon → the whole garden is in shadow (night).
-  if (sun.elevation <= 0) return { width, depth, lit };
-
-  const field = buildHeightfield(garden);
-  const ray = sunRayFor(garden, sun);
-  const maxDistance = Math.hypot(width, depth) + 1;
-
-  for (let cy = 0; cy < depth; cy++) {
-    for (let cx = 0; cx < width; cx++) {
-      const idx = tileIndex(width, cx, cy);
-      const sunlit =
-        !isUnderObject(field, idx) &&
-        !rayIsBlocked(field, cx, cy, ray, maxDistance);
-      lit[idx] = sunlit ? 1 : 0;
-    }
-  }
-
-  return { width, depth, lit };
-}
-
-/**
- * Like `computeLitGrid`, but returns each tile's fraction of direct sunlight in
- * [0,1], honouring object transmittance. A ray that passes through transmissive
- * objects accrues the product of their transmittances; an opaque object (the
- * default) zeroes it, reproducing the binary pass exactly.
+ * Returns each tile's fraction of direct sunlight in [0,1], honouring object
+ * transmittance. A ray that passes through transmissive objects accrues the
+ * product of their transmittances; an opaque object (the default) zeroes it.
  */
 export function computeSunFractionGrid(
   garden: Garden,

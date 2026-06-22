@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { eraseTile } from './ground-editor';
 import { buildScene } from './scene';
-import { computeLitGrid } from './shadow';
+import { computeSunFractionGrid } from './shadow';
 import type { Garden } from './types';
 import { LEVEL_HEIGHT_M, TILE_SIZE_M } from './types';
 
@@ -30,7 +30,7 @@ describe('buildScene — neutral scene description', () => {
   it('emits one tile per grid cell carrying position, elevation, and lit state', () => {
     const garden = gardenWithBuilding();
     const sun = { azimuth: 90 * DEG, elevation: 20 * DEG };
-    const scene = buildScene(garden, computeLitGrid(garden, sun), sun);
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
 
     expect(scene.width).toBe(3);
     expect(scene.depth).toBe(1);
@@ -48,7 +48,7 @@ describe('buildScene — neutral scene description', () => {
   it('translates objects into footprints with metric base + height', () => {
     const garden = gardenWithBuilding();
     const sun = { azimuth: 180 * DEG, elevation: 45 * DEG };
-    const scene = buildScene(garden, computeLitGrid(garden, sun), sun);
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
 
     expect(scene.objects).toEqual([
       {
@@ -71,7 +71,7 @@ describe('buildScene — neutral scene description', () => {
       longitude: 0,
     };
     const sun = { azimuth: 180 * DEG, elevation: 60 * DEG };
-    const scene = buildScene(garden, computeLitGrid(garden, sun), sun);
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
 
     expect(scene.tiles[0]?.elevationM).toBe(0);
     expect(scene.tiles[1]?.elevationM).toBeCloseTo(LEVEL_HEIGHT_M);
@@ -81,7 +81,7 @@ describe('buildScene — neutral scene description', () => {
     const garden = gardenWithBuilding();
     garden.northRotation = 30 * DEG;
     const sun = { azimuth: 120 * DEG, elevation: 35 * DEG };
-    const scene = buildScene(garden, computeLitGrid(garden, sun), sun);
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
 
     expect(scene.camera).toEqual({
       kind: 'orthographic',
@@ -94,15 +94,47 @@ describe('buildScene — neutral scene description', () => {
   it('marks every tile active by default, and erased tiles inactive', () => {
     const garden = eraseTile(gardenWithBuilding(), 1, 0);
     const sun = { azimuth: 90 * DEG, elevation: 20 * DEG };
-    const scene = buildScene(garden, computeLitGrid(garden, sun), sun);
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
 
     expect(scene.tiles.map((t) => t.active)).toEqual([true, false, true]);
+  });
+
+  it('ramps the instantaneous tile colour by direct-sun fraction (dappled shade)', () => {
+    // A 50%-transmittance tree over the middle tile of an open strip, sun high
+    // in the east so the tile east of the tree stays in full sun.
+    const garden: Garden = {
+      width: 3,
+      depth: 1,
+      groundLevels: [0, 0, 0],
+      objects: [
+        {
+          kind: 'tree',
+          footprint: { x: 1, y: 0, width: 1, depth: 1 },
+          baseLevel: 0,
+          heightM: 3,
+          transmittance: 0.5,
+        },
+      ],
+      northRotation: 0,
+      latitude: 0,
+      longitude: 0,
+    };
+    const sun = { azimuth: 90 * DEG, elevation: 60 * DEG };
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
+    const FULL_SUN = 0xf4d35e;
+
+    // East of the tree: unobstructed → full-sun colour.
+    expect(scene.tiles[2]?.lit).toBe(true);
+    expect(scene.tiles[2]?.colorHex).toBe(FULL_SUN);
+    // Under the tree: still lit, but a dappled colour off the full-sun end.
+    expect(scene.tiles[1]?.lit).toBe(true);
+    expect(scene.tiles[1]?.colorHex).not.toBe(FULL_SUN);
   });
 
   it('produces a JSON-serializable description (no engine types leak in)', () => {
     const garden = gardenWithBuilding();
     const sun = { azimuth: 90 * DEG, elevation: 20 * DEG };
-    const scene = buildScene(garden, computeLitGrid(garden, sun), sun);
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
 
     expect(() => JSON.stringify(scene)).not.toThrow();
     const roundTripped = JSON.parse(JSON.stringify(scene));

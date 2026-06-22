@@ -39,14 +39,11 @@ Where the sun is in the sky: azimuth (compass bearing clockwise from true north)
 _Avoid_: Sun angle, solar vector; "altitude" for elevation
 
 **Shadow pass**:
-The core computation that marks how much sun each tile gets for a given sun position by ray-casting from the tile surface toward the sun. Two variants share the geometry: a **binary** pass (every object opaque — the instantaneous scrub view) and a **fractional** pass (objects honour transmittance — the quantitative pass the heatmap integrates).
+The core computation that, for a given sun position, ray-casts from each tile's surface toward the sun to find how much direct light it receives. Objects honour transmittance, so the result is fractional — not just lit/shadow. Both the instantaneous scrub view and the sun-hours heatmap are built on it.
 _Avoid_: Ray trace, occlusion test
 
-**Lit grid**:
-The per-tile binary lit/shadow result of the shadow pass (scrub view).
-
 **Sun fraction grid**:
-The per-tile fraction of direct sunlight in [0,1] from the fractional shadow pass — 1 = unobstructed, 0 = opaque shadow, intermediate = the product of the transmittances of every object the ray passes through. Stacked transmissive blockers combine multiplicatively. This is what the sun-hours aggregation integrates.
+The per-tile fraction of direct sunlight in [0,1] the shadow pass produces — 1 = unobstructed, 0 = opaque shadow, intermediate = dappled (the product of the transmittances of every object the ray passes through, each object counted once). Stacked/distinct transmissive blockers combine multiplicatively. The scrub view ramps tile colour by it directly; the sun-hours aggregation integrates it over time.
 
 **Sun-hours heatmap**:
 The aggregate result (a later slice): each tile's average sunlight hours per day over a time window. The contract the future plants module consumes.

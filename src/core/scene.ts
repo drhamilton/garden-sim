@@ -14,7 +14,7 @@ import type {
   SunPosition,
 } from './types';
 import { LEVEL_HEIGHT_M, TILE_SIZE_M, isTileActive, tileIndex } from './types';
-import type { LitGrid } from './shadow';
+import type { SunFractionGrid } from './shadow';
 import type { SunHoursGrid } from './sun-hours';
 
 export interface SceneTile {
@@ -58,16 +58,21 @@ export interface SceneDescription {
 }
 
 /**
- * Builds the neutral scene description from a garden and a computed lit grid.
- * The grid must match the garden's dimensions. This is the instantaneous view —
- * each tile carries binary lit/shadow state for a single sun position.
+ * Builds the neutral scene description from a garden and a computed sun-fraction
+ * grid. The grid must match the garden's dimensions. This is the instantaneous
+ * view — each tile carries the fraction of direct sun it receives at a single
+ * sun position, ramped shade → sun so dappled (partly shaded) tiles read as an
+ * intermediate colour. `lit` stays true for any tile receiving some direct sun.
  */
 export function buildScene(
   garden: Garden,
-  litGrid: LitGrid,
+  fractionGrid: SunFractionGrid,
   sun: SunPosition,
 ): SceneDescription {
-  return sceneFor(garden, sun, (idx) => ({ lit: litGrid.lit[idx] === 1 }));
+  return sceneFor(garden, sun, (idx) => {
+    const fraction = fractionGrid.fraction[idx] ?? 0;
+    return { lit: fraction > EPSILON, colorHex: rampColor(fraction) };
+  });
 }
 
 /**
@@ -90,7 +95,7 @@ export function buildHeatmapScene(
     return {
       lit: sunHours > 0,
       sunHours,
-      colorHex: heatmapColor(fraction),
+      colorHex: rampColor(fraction),
     };
   });
 }
@@ -137,16 +142,18 @@ function sceneTiles(
   return tiles;
 }
 
-// Heatmap colour ramp: shadow blue → sun yellow, matching the renderer palette.
-const HEATMAP_SHADE = 0x39465a;
-const HEATMAP_SUN = 0xf4d35e;
+// Light ramp: shadow blue → sun yellow, matching the renderer palette. Shared
+// by the instantaneous view (ramped by a tile's direct-sun fraction) and the
+// heatmap (ramped by a tile's sun-hours across the grid's range).
+const RAMP_SHADE = 0x39465a;
+const RAMP_SUN = 0xf4d35e;
 
-/** Packs a 0..1 sun-hours fraction into a 0xRRGGBB colour along the ramp. */
-function heatmapColor(fraction: number): number {
+/** Packs a 0..1 light fraction into a 0xRRGGBB colour along the ramp. */
+function rampColor(fraction: number): number {
   const t = Math.min(1, Math.max(0, fraction));
   const lerp = (shift: number): number => {
-    const a = (HEATMAP_SHADE >> shift) & 0xff;
-    const b = (HEATMAP_SUN >> shift) & 0xff;
+    const a = (RAMP_SHADE >> shift) & 0xff;
+    const b = (RAMP_SUN >> shift) & 0xff;
     return Math.round(a + (b - a) * t);
   };
   return (lerp(16) << 16) | (lerp(8) << 8) | lerp(0);

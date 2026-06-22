@@ -58,9 +58,9 @@ export interface GardenObject {
   heightM: number;
   /**
    * Light transmittance in [0,1] — 0 = opaque, 1 = fully transparent.
-   * Omitted means opaque. Honoured by the fractional shadow pass
-   * (`computeSunFractionGrid`) and so by the sun-hours heatmap; the binary
-   * scrub pass (`computeLitGrid`) still treats every object as opaque.
+   * Omitted means opaque. Honoured by the shadow pass
+   * (`computeSunFractionGrid`), so it shapes both the instantaneous scrub view
+   * and the sun-hours heatmap.
    */
   transmittance?: number;
   /** Trees only: deciduous leaf-on/leaf-off range. */

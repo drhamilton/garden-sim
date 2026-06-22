@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeLitGrid, computeSunFractionGrid } from './shadow';
+import { computeSunFractionGrid } from './shadow';
 import type { Garden, GardenObject } from './types';
 import { tileIndex } from './types';
 
@@ -18,12 +18,14 @@ function strip(width: number, objects: GardenObject[] = []): Garden {
   };
 }
 
+/** Treats a tile as "lit" when it receives any direct sun (fraction > 0). */
 function litAt(garden: Garden, sun: { azimuth: number; elevation: number }) {
-  const grid = computeLitGrid(garden, sun);
-  return (x: number, y = 0) => grid.lit[tileIndex(garden.width, x, y)] === 1;
+  const grid = computeSunFractionGrid(garden, sun);
+  return (x: number, y = 0) =>
+    grid.fraction[tileIndex(garden.width, x, y)]! > 0;
 }
 
-describe('computeLitGrid — instantaneous shadow pass', () => {
+describe('computeSunFractionGrid — shadow geometry (opaque blockers)', () => {
   it('puts every tile in shadow when the sun is below the horizon', () => {
     const garden = strip(5, [
       {
@@ -33,11 +35,11 @@ describe('computeLitGrid — instantaneous shadow pass', () => {
         heightM: 3,
       },
     ]);
-    const grid = computeLitGrid(garden, {
+    const grid = computeSunFractionGrid(garden, {
       azimuth: 90 * DEG,
       elevation: -5 * DEG,
     });
-    expect([...grid.lit]).toEqual([0, 0, 0, 0, 0]);
+    expect([...grid.fraction]).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('casts a blocker shadow away from the sun (sun in the east → shadow to the west)', () => {
@@ -117,11 +119,11 @@ describe('computeLitGrid — instantaneous shadow pass', () => {
       latitude: 0,
       longitude: 0,
     };
-    const grid = computeLitGrid(garden, {
+    const grid = computeSunFractionGrid(garden, {
       azimuth: 90 * DEG,
       elevation: 20 * DEG,
     });
-    const lit = (y: number) => grid.lit[tileIndex(1, 0, y)] === 1;
+    const lit = (y: number) => grid.fraction[tileIndex(1, 0, y)]! > 0;
     // Rays march toward +y; tiles below the blocker (y<2) are shadowed.
     expect(lit(0)).toBe(false);
     expect(lit(1)).toBe(false);
@@ -190,7 +192,7 @@ describe('computeSunFractionGrid — dappled (fractional) shade', () => {
     expect(fraction(0)).toBeCloseTo(0.5);
   });
 
-  it('treats a fully opaque object exactly as the binary pass — no light', () => {
+  it('gives a fully opaque object hard-edged shadow — no light through it', () => {
     const garden = strip(5, [
       {
         kind: 'building',
@@ -201,7 +203,7 @@ describe('computeSunFractionGrid — dappled (fractional) shade', () => {
     ]);
     const fraction = fractionAt(garden, lowEast);
     const lit = litAt(garden, lowEast);
-    // West of the opaque building: blocked → no light, matching binary shadow.
+    // West of the opaque building: blocked → no light at all.
     expect(fraction(0)).toBe(0);
     expect(lit(0)).toBe(false);
     // East of it: open → full light.
