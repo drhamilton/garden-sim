@@ -63,6 +63,14 @@ export interface GardenObject {
    * and the sun-hours heatmap.
    */
   transmittance?: number;
+  /**
+   * Trees only: height in metres above the object's base where the opaque trunk
+   * gives way to the transmissive canopy. Below it the object blocks light
+   * solidly (the trunk); from it up to `heightM` the object passes
+   * `transmittance` (the canopy). Omitted means a uniform transmissive column
+   * with no opaque trunk. Clamped to `heightM` by the shadow pass.
+   */
+  canopyBaseM?: number;
   /** Trees only: deciduous leaf-on/leaf-off range. */
   deciduousRange?: DeciduousRange;
 }

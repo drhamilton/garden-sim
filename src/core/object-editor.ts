@@ -14,13 +14,17 @@ import type {
 /** Sensible starting properties for a freshly placed object, by kind. */
 const KIND_DEFAULTS: Record<
   GardenObjectKind,
-  Pick<GardenObject, 'heightM' | 'transmittance' | 'deciduousRange'>
+  Pick<
+    GardenObject,
+    'heightM' | 'transmittance' | 'canopyBaseM' | 'deciduousRange'
+  >
 > = {
   building: { heightM: 3, transmittance: 0 },
   fence: { heightM: 1.2, transmittance: 0 },
   tree: {
     heightM: 5,
     transmittance: 0.5,
+    canopyBaseM: 2,
     deciduousRange: { leafOn: '04-15', leafOff: '10-31' },
   },
 };
@@ -44,7 +48,7 @@ export function placeObject(
 export type GardenObjectPatch = Partial<
   Pick<
     GardenObject,
-    'baseLevel' | 'heightM' | 'transmittance' | 'deciduousRange'
+    'baseLevel' | 'heightM' | 'transmittance' | 'canopyBaseM' | 'deciduousRange'
   >
 >;
 

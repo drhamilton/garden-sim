@@ -319,7 +319,8 @@ function highlightActiveObjectTool(): void {
 }
 
 // Properties panel: edits the selected object's height, base level,
-// transmittance, and (for trees) its deciduous leaf-on/leaf-off range.
+// transmittance, and (for trees) its canopy base and deciduous leaf-on/leaf-off
+// range.
 const propertiesPanel = document.createElement('div');
 propertiesPanel.style.cssText =
   'display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; padding: 8px; border: 1px solid #444; max-width: 320px;';
@@ -358,6 +359,18 @@ transmittanceInput.step = '0.05';
 const transmittanceReadout = document.createElement('span');
 transmittanceRow.append(transmittanceInput, transmittanceReadout);
 
+// Trees only: the trunk top / canopy base — light below it is blocked solidly,
+// above it dapples through the canopy at the transmittance.
+const canopyBaseRow = document.createElement('label');
+canopyBaseRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+canopyBaseRow.append('Canopy base (m):');
+const canopyBaseInput = document.createElement('input');
+canopyBaseInput.type = 'number';
+canopyBaseInput.min = '0';
+canopyBaseInput.step = '0.1';
+canopyBaseRow.append(canopyBaseInput);
+setRowHidden(canopyBaseRow, true);
+
 const deciduousRow = document.createElement('div');
 deciduousRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
 setRowHidden(deciduousRow, true);
@@ -384,6 +397,7 @@ propertiesPanel.append(
   heightRow,
   baseLevelRow,
   transmittanceRow,
+  canopyBaseRow,
   deciduousRow,
   deleteObjectButton,
 );
@@ -429,8 +443,10 @@ function refreshPropertiesPanel(): void {
   const transmittance = obj.transmittance ?? 0;
   transmittanceInput.value = String(transmittance);
   transmittanceReadout.textContent = transmittance.toFixed(2);
+  setRowHidden(canopyBaseRow, obj.kind !== 'tree');
   setRowHidden(deciduousRow, obj.kind !== 'tree');
   if (obj.kind === 'tree') {
+    canopyBaseInput.value = String(obj.canopyBaseM ?? 0);
     leafOnInput.value = toDateInputValue(obj.deciduousRange?.leafOn ?? '04-15');
     leafOffInput.value = toDateInputValue(
       obj.deciduousRange?.leafOff ?? '10-31',
@@ -459,6 +475,12 @@ transmittanceInput.addEventListener('input', () => {
   const value = Number(transmittanceInput.value);
   transmittanceReadout.textContent = value.toFixed(2);
   applyObjectPatch({ transmittance: value });
+});
+
+canopyBaseInput.addEventListener('change', () => {
+  const value = Number(canopyBaseInput.value);
+  if (Number.isFinite(value) && value >= 0)
+    applyObjectPatch({ canopyBaseM: value });
 });
 
 function applyDeciduousRange(): void {

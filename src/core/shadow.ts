@@ -111,13 +111,25 @@ function sunFractionForTile(
   maxDistance: number,
   seenByObject: Int32Array,
 ): number {
-  const { width, depth, surfaceM, obstacleM, transmittanceAt, objectIdAt } =
-    field;
+  const {
+    width,
+    depth,
+    surfaceM,
+    obstacleM,
+    opaqueTopM,
+    transmittanceAt,
+    objectIdAt,
+  } = field;
   const { maxObstacleM } = field;
   const originIdx = tileIndex(width, cx, cy);
   let fraction = 1;
 
   // An object sitting over the tile attenuates the light reaching its surface.
+  // The tile's own object dapples by its canopy transmittance regardless of sun
+  // angle — we don't trunk-block the origin tile, because trunk and canopy share
+  // one footprint, so a geometric test would block even an overhead ray through
+  // the canopy. (A narrower trunk footprint, deferred, is what would let a low
+  // ray here read as trunk-shaded; see CONTEXT.md "Canopy base".)
   if (isUnderObject(field, originIdx)) {
     fraction *= transmittanceAt[originIdx]!;
     if (fraction <= EPSILON) return 0;
@@ -145,9 +157,11 @@ function sunFractionForTile(
     lastIdx = idx;
 
     if (obstacleM[idx]! <= rayHeight + EPSILON) continue; // ray clears it
+    // Below the obstacle's opaque segment (bare ground, a building, or a tree's
+    // trunk) the ray is blocked solidly; only above it does the canopy dapple.
+    if (rayHeight <= opaqueTopM[idx]! + EPSILON) return 0;
     const objectId = objectIdAt[idx]!;
-    // Bare-ground obstacle (raised terrain) is opaque; an object already
-    // crossed by this ray has spent its attenuation.
+    // An object already crossed by this ray has spent its attenuation.
     if (objectId < 0) return 0;
     if (markObjectSeen(seenByObject, objectId, originIdx)) {
       fraction *= transmittanceAt[idx]!;
