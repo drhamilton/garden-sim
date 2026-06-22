@@ -7,15 +7,16 @@
 // Location and true-north rotation are fixed; date and aggregation window are
 // user-controlled. State is in-memory only.
 
-import type { Garden, SunAtDateTime, SunPosition } from './core';
+import type { Garden, SunAtDateTime, SunPosition, WindowPreset } from './core';
 import {
   DEFAULT_SAMPLE_INTERVAL_DAYS,
+  addDays,
   aggregateSunHours,
   buildHeatmapScene,
   buildScene,
   computeLitGrid,
-  sampleDay,
   sampleWindow,
+  windowBounds,
 } from './core';
 import { SunCalcSolarPosition, ThreeOrthographicRenderer } from './adapters';
 
@@ -79,116 +80,34 @@ const sunAtDateTime: SunAtDateTime = (date, hour) => {
 
 function renderAtHour(hour: number): void {
   const sun = sunAtHourOnDate(currentDate, hour);
-  const lit = computeLitGrid(garden, sun);
-  renderer.render(buildScene(garden, lit, sun));
+  renderer.render(buildScene(garden, computeLitGrid(garden, sun), sun));
 }
 
 function renderHeatmap(
   startDate: Date,
   endDate: Date,
 ): { minHours: number; maxHours: number; dayCount: number } {
-  const oneDayWindow = startDate.getTime() === endDate.getTime();
-  let samples, dayCount;
-
-  if (oneDayWindow) {
-    const sunAt = (h: number) => sunAtDateTime(startDate, h);
-    samples = sampleDay(sunAt);
-    dayCount = 1;
-  } else {
-    ({ samples, dayCount } = sampleWindow(
-      startDate,
-      endDate,
-      sunAtDateTime,
-      DEFAULT_SAMPLE_INTERVAL_DAYS,
-    ));
-  }
-
+  const { samples, dayCount } = sampleWindow(
+    startDate,
+    endDate,
+    sunAtDateTime,
+    DEFAULT_SAMPLE_INTERVAL_DAYS,
+  );
   const grid = aggregateSunHours(garden, samples, dayCount);
   const noonSun = sunAtDateTime(startDate, 12);
   renderer.render(buildHeatmapScene(garden, grid, noonSun));
   return { minHours: grid.minHours, maxHours: grid.maxHours, dayCount };
 }
 
-// --- Window preset helpers ---------------------------------------------------
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-type WindowPreset = 'day' | 'month' | 'season' | 'custom';
-
-/** Approximate astronomical season containing the given date (UTC). */
-function seasonBounds(d: Date): { start: Date; end: Date } {
-  const y = d.getUTCFullYear();
-  const seasons: Array<{ start: Date; end: Date }> = [
-    {
-      start: new Date(Date.UTC(y - 1, 11, 21)),
-      end: new Date(Date.UTC(y, 2, 19)),
-    }, // Winter: Dec 21 – Mar 19
-    {
-      start: new Date(Date.UTC(y, 2, 20)),
-      end: new Date(Date.UTC(y, 5, 20)),
-    }, // Spring: Mar 20 – Jun 20
-    {
-      start: new Date(Date.UTC(y, 5, 21)),
-      end: new Date(Date.UTC(y, 8, 22)),
-    }, // Summer: Jun 21 – Sep 22
-    {
-      start: new Date(Date.UTC(y, 8, 23)),
-      end: new Date(Date.UTC(y, 11, 20)),
-    }, // Autumn: Sep 23 – Dec 20
-    {
-      start: new Date(Date.UTC(y, 11, 21)),
-      end: new Date(Date.UTC(y + 1, 2, 19)),
-    }, // Winter next
-  ];
-  const t = d.getTime();
-  for (const s of seasons) {
-    if (t >= s.start.getTime() && t <= s.end.getTime()) return s;
-  }
-  return seasons[1]!; // fallback: spring
-}
-
-function windowForPreset(
-  preset: WindowPreset,
-  dateStr: string,
-  customStartStr: string,
-  customEndStr: string,
-): { start: Date; end: Date } {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  switch (preset) {
-    case 'day':
-      return { start: d, end: d };
-    case 'month': {
-      const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
-      const end = new Date(
-        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
-      );
-      return { start, end };
-    }
-    case 'season':
-      return seasonBounds(d);
-    case 'custom': {
-      const start = new Date(`${customStartStr}T00:00:00Z`);
-      const end = new Date(`${customEndStr}T00:00:00Z`);
-      return { start: start <= end ? start : end, end: start <= end ? end : start };
-    }
-  }
-}
-
-function formatDateRange(start: Date, end: Date): string {
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return start.getTime() === end.getTime() ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
-}
-
 // --- Minimal vanilla controls ------------------------------------------------
 
-const css = (el: HTMLElement, style: string) => (el.style.cssText = style);
-
 const controls = document.createElement('div');
-css(controls, 'font-family: system-ui, sans-serif; color: #ddd; margin-top: 8px;');
+controls.style.cssText =
+  'font-family: system-ui, sans-serif; color: #ddd; margin-top: 8px;';
 
 // Row 1: time-of-day scrub
 const row1 = document.createElement('div');
-css(row1, 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;');
+row1.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 
 const slider = document.createElement('input');
 slider.type = 'range';
@@ -203,30 +122,30 @@ const timeLabel = document.createElement('span');
 
 const heatmapButton = document.createElement('button');
 heatmapButton.type = 'button';
-css(heatmapButton, 'cursor: pointer;');
+heatmapButton.style.cursor = 'pointer';
 
 // Row 2: date picker
 const row2 = document.createElement('div');
-css(row2, 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;');
+row2.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 
-const dateLabel = document.createElement('label');
-dateLabel.textContent = 'Date:';
-dateLabel.htmlFor = 'garden-date';
+const datePickerLabel = document.createElement('label');
+datePickerLabel.textContent = 'Date:';
+datePickerLabel.htmlFor = 'garden-date';
 
 const datePicker = document.createElement('input');
 datePicker.type = 'date';
 datePicker.id = 'garden-date';
 datePicker.value = currentDate;
-css(datePicker, 'color: #111; cursor: pointer;');
+datePicker.style.cssText = 'color: #111; cursor: pointer;';
 
-// Row 3: window selector (heatmap mode only)
+// Row 3: window preset selector (heatmap mode only)
 const row3 = document.createElement('div');
-css(row3, 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;');
+row3.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 
 const windowLabel = document.createElement('span');
 windowLabel.textContent = 'Window:';
 
-const presetButtons: Array<{ preset: WindowPreset; label: string }> = [
+const presets: Array<{ preset: WindowPreset; label: string }> = [
   { preset: 'day', label: 'Day' },
   { preset: 'month', label: 'Month' },
   { preset: 'season', label: 'Season' },
@@ -235,12 +154,12 @@ const presetButtons: Array<{ preset: WindowPreset; label: string }> = [
 
 let activePreset: WindowPreset = 'day';
 
-const presetBtns = presetButtons.map(({ preset, label }) => {
+const presetBtns = presets.map(({ preset, label }) => {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.textContent = label;
   btn.dataset['preset'] = preset;
-  css(btn, 'cursor: pointer;');
+  btn.style.cursor = 'pointer';
   btn.addEventListener('click', () => {
     activePreset = preset;
     row4.hidden = preset !== 'custom';
@@ -251,7 +170,7 @@ const presetBtns = presetButtons.map(({ preset, label }) => {
 
 // Row 4: custom date range (hidden unless 'custom' preset)
 const row4 = document.createElement('div');
-css(row4, 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;');
+row4.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 row4.hidden = true;
 
 const customStartLabel = document.createElement('label');
@@ -262,7 +181,7 @@ const customStartPicker = document.createElement('input');
 customStartPicker.type = 'date';
 customStartPicker.id = 'garden-custom-start';
 customStartPicker.value = currentDate;
-css(customStartPicker, 'color: #111; cursor: pointer;');
+customStartPicker.style.cssText = 'color: #111; cursor: pointer;';
 
 const customEndLabel = document.createElement('label');
 customEndLabel.textContent = 'To:';
@@ -271,16 +190,14 @@ customEndLabel.htmlFor = 'garden-custom-end';
 const customEndPicker = document.createElement('input');
 customEndPicker.type = 'date';
 customEndPicker.id = 'garden-custom-end';
-customEndPicker.value = new Date(
-  new Date(`${currentDate}T00:00:00Z`).getTime() + 30 * MS_PER_DAY,
-)
+customEndPicker.value = addDays(new Date(`${currentDate}T00:00:00Z`), 30)
   .toISOString()
   .slice(0, 10);
-css(customEndPicker, 'color: #111; cursor: pointer;');
+customEndPicker.style.cssText = 'color: #111; cursor: pointer;';
 
 // Readout row
 const readout = document.createElement('div');
-css(readout, 'font-size: 0.85em; opacity: 0.85;');
+readout.style.cssText = 'font-size: 0.85em; opacity: 0.85;';
 
 // --- State and rendering -----------------------------------------------------
 
@@ -293,6 +210,11 @@ function formatHour(hour: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} UTC`;
 }
 
+function formatDateRange(start: Date, end: Date): string {
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  return start.getTime() === end.getTime() ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
+}
+
 function highlightActivePreset(): void {
   for (const btn of presetBtns) {
     btn.style.fontWeight = btn.dataset['preset'] === activePreset ? 'bold' : '';
@@ -301,12 +223,10 @@ function highlightActivePreset(): void {
 
 function update(): void {
   if (mode === 'heatmap') {
-    const { start, end } = windowForPreset(
-      activePreset,
-      currentDate,
-      customStartPicker.value,
-      customEndPicker.value,
-    );
+    const refDate = new Date(`${currentDate}T00:00:00Z`);
+    const customStart = new Date(`${customStartPicker.value}T00:00:00Z`);
+    const customEnd = new Date(`${customEndPicker.value}T00:00:00Z`);
+    const { start, end } = windowBounds(activePreset, refDate, customStart, customEnd);
     const { minHours, maxHours, dayCount } = renderHeatmap(start, end);
     heatmapButton.textContent = 'Scrub the day';
     row3.hidden = false;
@@ -351,7 +271,7 @@ for (const picker of [customStartPicker, customEndPicker]) {
 // --- Assemble DOM ------------------------------------------------------------
 
 row1.append(slider, timeLabel, heatmapButton);
-row2.append(dateLabel, datePicker);
+row2.append(datePickerLabel, datePicker);
 row3.append(windowLabel, ...presetBtns);
 row4.append(customStartLabel, customStartPicker, customEndLabel, customEndPicker);
 

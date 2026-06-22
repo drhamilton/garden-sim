@@ -27,6 +27,9 @@ export {
   sampleWindow,
 } from './sun-hours';
 
+export type { WindowPreset } from './window';
+export { addDays, windowBounds } from './window';
+
 export type {
   SceneDescription,
   SceneTile,
