@@ -15,6 +15,8 @@ import {
   buildHeatmapScene,
   buildScene,
   computeLitGrid,
+  eraseTile,
+  paintTile,
   sampleWindow,
   windowBounds,
 } from './core';
@@ -50,7 +52,8 @@ const SCENES: Array<{ name: string; description: string; garden: Garden }> = [
     // Greenwich noon elevation: winter ~15° → shadow 30 tiles (whole garden);
     // summer ~62° → shadow 4 tiles. Dramatic N-S seasonal contrast.
     name: 'South fence',
-    description: '2.5 m fence across the south edge — long winter shadow, short summer shadow.',
+    description:
+      '2.5 m fence across the south edge — long winter shadow, short summer shadow.',
     garden: baseGarden([
       {
         kind: 'fence',
@@ -66,7 +69,8 @@ const SCENES: Array<{ name: string; description: string; garden: Garden }> = [
     // of the garden. Summer: sun rises NE and climbs steeply → shadow short
     // and confined to the NE. Good "spring vs summer" heatmap comparison.
     name: 'SW corner block',
-    description: '6 m building in SW corner — large spring shadow, retreats in summer.',
+    description:
+      '6 m building in SW corner — large spring shadow, retreats in summer.',
     garden: baseGarden([
       {
         kind: 'building',
@@ -154,7 +158,8 @@ controls.style.cssText =
 
 // Row 0: scene selector
 const row0 = document.createElement('div');
-row0.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+row0.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 
 const sceneLabel = document.createElement('span');
 sceneLabel.textContent = 'Scene:';
@@ -173,9 +178,45 @@ const sceneBtns = SCENES.map(({ name, description }, i) => {
   return btn;
 });
 
+// Ground tool row: paint/erase the garden's footprint
+const groundToolRow = document.createElement('div');
+groundToolRow.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+
+const groundToolLabel = document.createElement('span');
+groundToolLabel.textContent = 'Ground:';
+
+type GroundTool = 'paint' | 'erase';
+let groundTool: GroundTool = 'paint';
+
+const GROUND_TOOLS: Array<{ tool: GroundTool; label: string }> = [
+  { tool: 'paint', label: 'Paint' },
+  { tool: 'erase', label: 'Erase' },
+];
+
+const groundToolBtns: Array<{ tool: GroundTool; btn: HTMLButtonElement }> =
+  GROUND_TOOLS.map(({ tool, label }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.style.cursor = 'pointer';
+    btn.addEventListener('click', () => {
+      groundTool = tool;
+      highlightActiveGroundTool();
+    });
+    return { tool, btn };
+  });
+
+function highlightActiveGroundTool(): void {
+  for (const { tool, btn } of groundToolBtns) {
+    btn.style.fontWeight = tool === groundTool ? 'bold' : '';
+  }
+}
+
 // Row 1: time-of-day scrub
 const row1 = document.createElement('div');
-row1.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+row1.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 
 const slider = document.createElement('input');
 slider.type = 'range';
@@ -194,7 +235,8 @@ heatmapButton.style.cursor = 'pointer';
 
 // Row 2: date picker
 const row2 = document.createElement('div');
-row2.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+row2.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 
 const datePickerLabel = document.createElement('label');
 datePickerLabel.textContent = 'Date:';
@@ -208,7 +250,8 @@ datePicker.style.cursor = 'pointer';
 
 // Row 3: window preset selector (heatmap mode only)
 const row3 = document.createElement('div');
-row3.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+row3.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 
 const windowLabel = document.createElement('span');
 windowLabel.textContent = 'Window:';
@@ -238,7 +281,8 @@ const presetBtns = presets.map(({ preset, label }) => {
 
 // Row 4: custom date range (hidden unless 'custom' preset)
 const row4 = document.createElement('div');
-row4.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+row4.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
 row4.hidden = true;
 
 const customStartLabel = document.createElement('label');
@@ -280,7 +324,9 @@ function formatHour(hour: number): string {
 
 function formatDateRange(start: Date, end: Date): string {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  return start.getTime() === end.getTime() ? fmt(start) : `${fmt(start)} – ${fmt(end)}`;
+  return start.getTime() === end.getTime()
+    ? fmt(start)
+    : `${fmt(start)} – ${fmt(end)}`;
 }
 
 function highlightActivePreset(): void {
@@ -301,7 +347,12 @@ function update(): void {
     const refDate = new Date(`${currentDate}T00:00:00Z`);
     const customStart = new Date(`${customStartPicker.value}T00:00:00Z`);
     const customEnd = new Date(`${customEndPicker.value}T00:00:00Z`);
-    const { start, end } = windowBounds(activePreset, refDate, customStart, customEnd);
+    const { start, end } = windowBounds(
+      activePreset,
+      refDate,
+      customStart,
+      customEnd,
+    );
     renderHeatmap(start, end);
     heatmapButton.textContent = 'Scrub the day';
     row3.hidden = false;
@@ -343,15 +394,52 @@ for (const picker of [customStartPicker, customEndPicker]) {
   });
 }
 
+// --- Ground editing: drag-paint tiles in/out of the footprint ---------------
+
+let isPaintingGround = false;
+
+function applyGroundToolAt(clientX: number, clientY: number): void {
+  const tile = renderer.pickTile(clientX, clientY);
+  if (!tile) return;
+  const edit = groundTool === 'paint' ? paintTile : eraseTile;
+  const next = edit(garden, tile.x, tile.y);
+  if (next !== garden) {
+    garden = next;
+    SCENES[activeScene]!.garden = garden;
+    update();
+  }
+}
+
+canvas.style.touchAction = 'none';
+canvas.style.cursor = 'crosshair';
+
+canvas.addEventListener('pointerdown', (e) => {
+  isPaintingGround = true;
+  applyGroundToolAt(e.clientX, e.clientY);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (isPaintingGround) applyGroundToolAt(e.clientX, e.clientY);
+});
+window.addEventListener('pointerup', () => {
+  isPaintingGround = false;
+});
+
 // --- Assemble DOM ------------------------------------------------------------
 
 row0.append(sceneLabel, ...sceneBtns);
+groundToolRow.append(groundToolLabel, ...groundToolBtns.map(({ btn }) => btn));
 row1.append(slider, timeLabel, heatmapButton);
 row2.append(datePickerLabel, datePicker);
 row3.append(windowLabel, ...presetBtns);
-row4.append(customStartLabel, customStartPicker, customEndLabel, customEndPicker);
+row4.append(
+  customStartLabel,
+  customStartPicker,
+  customEndLabel,
+  customEndPicker,
+);
 
-controls.append(row0, row1, row2, row3, row4, readout);
+controls.append(row0, groundToolRow, row1, row2, row3, row4, readout);
 canvas.insertAdjacentElement('afterend', controls);
 
+highlightActiveGroundTool();
 update();

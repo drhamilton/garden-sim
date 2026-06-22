@@ -13,7 +13,7 @@ import type {
   GardenObjectKind,
   SunPosition,
 } from './types';
-import { LEVEL_HEIGHT_M, TILE_SIZE_M, tileIndex } from './types';
+import { LEVEL_HEIGHT_M, TILE_SIZE_M, isTileActive, tileIndex } from './types';
 import type { LitGrid } from './shadow';
 import type { SunHoursGrid } from './sun-hours';
 
@@ -22,6 +22,8 @@ export interface SceneTile {
   y: number;
   /** Ground surface height in metres. */
   elevationM: number;
+  /** Whether this tile is part of the garden's footprint. */
+  active: boolean;
   lit: boolean;
   /** Heatmap mode: average sun-hours per day for this tile. */
   sunHours?: number;
@@ -126,6 +128,7 @@ function sceneTiles(
         x,
         y,
         elevationM: (groundLevels[idx] ?? 0) * LEVEL_HEIGHT_M,
+        active: isTileActive(garden, idx),
         lit: false,
         ...tileState(idx),
       });

@@ -18,7 +18,9 @@ import {
   MeshStandardMaterial,
   OrthographicCamera,
   PlaneGeometry,
+  Raycaster,
   Scene,
+  Vector2,
   WebGLRenderer,
 } from 'three';
 import type { RendererPort } from '../../ports';
@@ -26,6 +28,8 @@ import type { SceneDescription, SceneTile } from '../../core';
 
 const LIT_COLOR = new Color(0xf4d35e);
 const SHADOW_COLOR = new Color(0x39465a);
+const INACTIVE_COLOR = new Color(0x1a1f29);
+const INACTIVE_OPACITY = 0.25;
 const OBJECT_COLORS: Record<string, number> = {
   building: 0xb08968,
   fence: 0x9c7a54,
@@ -40,6 +44,7 @@ export class ThreeOrthographicRenderer implements RendererPort {
   private readonly camera: OrthographicCamera;
   private readonly sunLight = new DirectionalLight(0xffffff, 1.6);
   private readonly group = new Group();
+  private readonly raycaster = new Raycaster();
   private tileMeshes: Mesh[] = [];
   private structureKey = '';
 
@@ -90,7 +95,10 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
     const tileGeometry = new PlaneGeometry(1 - TILE_GAP, 1 - TILE_GAP);
     for (const tile of scene.tiles) {
-      const material = new MeshStandardMaterial({ roughness: 0.95 });
+      const material = new MeshStandardMaterial({
+        roughness: 0.95,
+        transparent: true,
+      });
       this.applyTileAppearance(material, tile);
       const mesh = new Mesh(tileGeometry, material);
       mesh.rotation.x = -Math.PI / 2; // lay flat on the XZ plane
@@ -99,6 +107,8 @@ export class ThreeOrthographicRenderer implements RendererPort {
         tile.elevationM / scene.tileSizeM,
         tile.y + 0.5,
       );
+      mesh.userData['tileX'] = tile.x;
+      mesh.userData['tileY'] = tile.y;
       this.group.add(mesh);
       this.tileMeshes.push(mesh);
     }
@@ -142,9 +152,34 @@ export class ThreeOrthographicRenderer implements RendererPort {
     material: MeshStandardMaterial,
     tile: SceneTile,
   ): void {
-    if (tile.colorHex != null) material.color.set(tile.colorHex);
-    else material.color.copy(tile.lit ? LIT_COLOR : SHADOW_COLOR);
+    if (!tile.active) {
+      material.color.copy(INACTIVE_COLOR);
+      material.opacity = INACTIVE_OPACITY;
+    } else if (tile.colorHex != null) {
+      material.color.set(tile.colorHex);
+      material.opacity = 1;
+    } else {
+      material.color.copy(tile.lit ? LIT_COLOR : SHADOW_COLOR);
+      material.opacity = 1;
+    }
     material.emissiveIntensity = 0;
+  }
+
+  /** Maps a pointer position in CSS pixels to the grid tile under it. */
+  pickTile(clientX: number, clientY: number): { x: number; y: number } | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObjects(this.tileMeshes, false)[0];
+    if (!hit) return null;
+    const { tileX, tileY } = hit.object.userData as {
+      tileX: number;
+      tileY: number;
+    };
+    return { x: tileX, y: tileY };
   }
 
   private updateSun(scene: SceneDescription): void {

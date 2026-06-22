@@ -10,7 +10,9 @@ export type {
   GardenObjectKind,
   Garden,
 } from './types';
-export { TILE_SIZE_M, LEVEL_HEIGHT_M, tileIndex } from './types';
+export { TILE_SIZE_M, LEVEL_HEIGHT_M, tileIndex, isTileActive } from './types';
+
+export { paintTile, eraseTile } from './ground-editor';
 
 export type { Heightfield } from './heightfield';
 export { buildHeightfield } from './heightfield';
@@ -18,7 +20,12 @@ export { buildHeightfield } from './heightfield';
 export type { LitGrid } from './shadow';
 export { computeLitGrid } from './shadow';
 
-export type { DaySample, SunAt, SunAtDateTime, SunHoursGrid } from './sun-hours';
+export type {
+  DaySample,
+  SunAt,
+  SunAtDateTime,
+  SunHoursGrid,
+} from './sun-hours';
 export {
   DEFAULT_SAMPLE_INTERVAL_DAYS,
   DEFAULT_STEP_HOURS,

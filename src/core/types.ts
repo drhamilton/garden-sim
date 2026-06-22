@@ -63,6 +63,12 @@ export interface Garden {
   width: number;
   depth: number;
   groundLevels: readonly number[];
+  /**
+   * Whether each tile is part of the garden's footprint, row-major. Tiles
+   * outside the footprint are excluded from the editor's view. Omitted means
+   * every tile in the grid is active (the pre-editor default).
+   */
+  active?: readonly boolean[];
   objects: readonly GardenObject[];
   northRotation: number;
   latitude: number;
@@ -72,4 +78,9 @@ export interface Garden {
 /** Row-major index of tile (x, y) in a grid of the given width. */
 export function tileIndex(width: number, x: number, y: number): number {
   return y * width + x;
+}
+
+/** Whether the tile at row-major index `idx` is part of the garden's footprint. */
+export function isTileActive(garden: Garden, idx: number): boolean {
+  return garden.active?.[idx] ?? true;
 }
