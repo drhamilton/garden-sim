@@ -8,11 +8,20 @@ export type {
   Footprint,
   GardenObject,
   GardenObjectKind,
+  DeciduousRange,
   Garden,
 } from './types';
 export { TILE_SIZE_M, LEVEL_HEIGHT_M, tileIndex, isTileActive } from './types';
 
 export { paintTile, eraseTile } from './ground-editor';
+
+export type { GardenObjectPatch } from './object-editor';
+export {
+  placeObject,
+  updateObjectAt,
+  removeObjectAt,
+  objectAt,
+} from './object-editor';
 
 export type { Heightfield } from './heightfield';
 export { buildHeightfield } from './heightfield';

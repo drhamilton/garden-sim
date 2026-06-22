@@ -7,7 +7,14 @@
 // Location and true-north rotation are fixed; date and aggregation window are
 // user-controlled. State is in-memory only.
 
-import type { Garden, SunAtDateTime, SunPosition, WindowPreset } from './core';
+import type {
+  Garden,
+  GardenObjectKind,
+  GardenObjectPatch,
+  SunAtDateTime,
+  SunPosition,
+  WindowPreset,
+} from './core';
 import {
   DEFAULT_SAMPLE_INTERVAL_DAYS,
   addDays,
@@ -16,8 +23,12 @@ import {
   buildScene,
   computeLitGrid,
   eraseTile,
+  objectAt,
   paintTile,
+  placeObject,
+  removeObjectAt,
   sampleWindow,
+  updateObjectAt,
   windowBounds,
 } from './core';
 import { SunCalcSolarPosition, ThreeOrthographicRenderer } from './adapters';
@@ -152,6 +163,21 @@ function renderHeatmap(startDate: Date, endDate: Date): void {
 
 // --- Minimal vanilla controls ------------------------------------------------
 
+/**
+ * Shows/hides an element by toggling inline `display`. These rows set their
+ * own `display` via `style.cssText` (for flex layout), which as an inline
+ * style always beats the `[hidden]` UA rule — so toggling `.hidden` alone is
+ * a no-op once `cssText` has set `display`. Set visibility through `display`
+ * directly instead.
+ */
+function setRowHidden(
+  el: HTMLElement,
+  hiddenFlag: boolean,
+  display = 'flex',
+): void {
+  el.style.display = hiddenFlag ? 'none' : display;
+}
+
 const controls = document.createElement('div');
 controls.style.cssText =
   'font-family: system-ui, sans-serif; color: #000; margin-top: 8px;';
@@ -173,6 +199,7 @@ const sceneBtns = SCENES.map(({ name, description }, i) => {
   btn.addEventListener('click', () => {
     activeScene = i;
     garden = SCENES[i]!.garden;
+    deselectObject();
     update();
   });
   return btn;
@@ -212,6 +239,250 @@ function highlightActiveGroundTool(): void {
     btn.style.fontWeight = tool === groundTool ? 'bold' : '';
   }
 }
+
+// Editor mode: ground footprint editing, or placing/editing objects.
+const editorRow = document.createElement('div');
+editorRow.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+
+const editorLabel = document.createElement('span');
+editorLabel.textContent = 'Editor:';
+
+type EditorMode = 'ground' | 'object';
+let editorMode: EditorMode = 'ground';
+
+const EDITOR_MODES: Array<{ mode: EditorMode; label: string }> = [
+  { mode: 'ground', label: 'Ground' },
+  { mode: 'object', label: 'Objects' },
+];
+
+const editorModeBtns = EDITOR_MODES.map(({ mode, label }) => {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = label;
+  btn.style.cursor = 'pointer';
+  btn.addEventListener('click', () => {
+    editorMode = mode;
+    refreshEditorVisibility();
+  });
+  return { mode, btn };
+});
+
+function highlightActiveEditorMode(): void {
+  for (const { mode, btn } of editorModeBtns) {
+    btn.style.fontWeight = mode === editorMode ? 'bold' : '';
+  }
+}
+
+function refreshEditorVisibility(): void {
+  highlightActiveEditorMode();
+  setRowHidden(groundToolRow, editorMode !== 'ground');
+  setRowHidden(objectToolRow, editorMode !== 'object');
+  if (editorMode !== 'object') deselectObject();
+}
+
+// Object tool row: pick a kind to place, or switch to selecting an existing object.
+const objectToolRow = document.createElement('div');
+objectToolRow.style.cssText =
+  'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
+setRowHidden(objectToolRow, true);
+
+const objectToolLabel = document.createElement('span');
+objectToolLabel.textContent = 'Object:';
+
+type ObjectTool = 'select' | GardenObjectKind;
+let objectTool: ObjectTool = 'select';
+
+const OBJECT_TOOLS: Array<{ tool: ObjectTool; label: string }> = [
+  { tool: 'select', label: 'Select' },
+  { tool: 'building', label: 'Building' },
+  { tool: 'fence', label: 'Fence' },
+  { tool: 'tree', label: 'Tree' },
+];
+
+const objectToolBtns = OBJECT_TOOLS.map(({ tool, label }) => {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = label;
+  btn.style.cursor = 'pointer';
+  btn.addEventListener('click', () => {
+    objectTool = tool;
+    highlightActiveObjectTool();
+  });
+  return { tool, btn };
+});
+
+function highlightActiveObjectTool(): void {
+  for (const { tool, btn } of objectToolBtns) {
+    btn.style.fontWeight = tool === objectTool ? 'bold' : '';
+  }
+}
+
+// Properties panel: edits the selected object's height, base level,
+// transmittance, and (for trees) its deciduous leaf-on/leaf-off range.
+const propertiesPanel = document.createElement('div');
+propertiesPanel.style.cssText =
+  'display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; padding: 8px; border: 1px solid #444; max-width: 320px;';
+setRowHidden(propertiesPanel, true);
+
+let selectedObjectIndex: number | null = null;
+
+const propKindLabel = document.createElement('strong');
+
+const heightRow = document.createElement('label');
+heightRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+heightRow.append('Height (m):');
+const heightInput = document.createElement('input');
+heightInput.type = 'number';
+heightInput.min = '0.1';
+heightInput.step = '0.1';
+heightRow.append(heightInput);
+
+const baseLevelRow = document.createElement('label');
+baseLevelRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+baseLevelRow.append('Base level:');
+const baseLevelInput = document.createElement('input');
+baseLevelInput.type = 'number';
+baseLevelInput.step = '1';
+baseLevelRow.append(baseLevelInput);
+
+const transmittanceRow = document.createElement('label');
+transmittanceRow.style.cssText =
+  'display: flex; align-items: center; gap: 6px;';
+transmittanceRow.append('Transmittance:');
+const transmittanceInput = document.createElement('input');
+transmittanceInput.type = 'range';
+transmittanceInput.min = '0';
+transmittanceInput.max = '1';
+transmittanceInput.step = '0.05';
+const transmittanceReadout = document.createElement('span');
+transmittanceRow.append(transmittanceInput, transmittanceReadout);
+
+const deciduousRow = document.createElement('div');
+deciduousRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+setRowHidden(deciduousRow, true);
+
+const leafOnLabel = document.createElement('label');
+leafOnLabel.append('Leaf-on:');
+const leafOnInput = document.createElement('input');
+leafOnInput.type = 'date';
+
+const leafOffLabel = document.createElement('label');
+leafOffLabel.append('Leaf-off:');
+const leafOffInput = document.createElement('input');
+leafOffInput.type = 'date';
+
+deciduousRow.append(leafOnLabel, leafOnInput, leafOffLabel, leafOffInput);
+
+const deleteObjectButton = document.createElement('button');
+deleteObjectButton.type = 'button';
+deleteObjectButton.textContent = 'Delete object';
+deleteObjectButton.style.cursor = 'pointer';
+
+propertiesPanel.append(
+  propKindLabel,
+  heightRow,
+  baseLevelRow,
+  transmittanceRow,
+  deciduousRow,
+  deleteObjectButton,
+);
+
+// Deciduous dates only need a month/day; a fixed dummy year drives the
+// <input type="date"> widget while the model stores just "MM-DD".
+const DUMMY_YEAR = '2000';
+function toDateInputValue(monthDay: string): string {
+  return `${DUMMY_YEAR}-${monthDay}`;
+}
+function fromDateInputValue(value: string): string {
+  return value.slice(5);
+}
+
+function deselectObject(): void {
+  selectedObjectIndex = null;
+  setRowHidden(propertiesPanel, true);
+}
+
+function selectObjectAt(x: number, y: number): void {
+  const index = objectAt(garden, x, y);
+  if (index === null) {
+    deselectObject();
+    return;
+  }
+  selectedObjectIndex = index;
+  refreshPropertiesPanel();
+}
+
+function refreshPropertiesPanel(): void {
+  const obj =
+    selectedObjectIndex === null
+      ? undefined
+      : garden.objects[selectedObjectIndex];
+  if (!obj) {
+    deselectObject();
+    return;
+  }
+  setRowHidden(propertiesPanel, false);
+  propKindLabel.textContent = `${obj.kind} @ (${obj.footprint.x}, ${obj.footprint.y})`;
+  heightInput.value = String(obj.heightM);
+  baseLevelInput.value = String(obj.baseLevel);
+  const transmittance = obj.transmittance ?? 0;
+  transmittanceInput.value = String(transmittance);
+  transmittanceReadout.textContent = transmittance.toFixed(2);
+  setRowHidden(deciduousRow, obj.kind !== 'tree');
+  if (obj.kind === 'tree') {
+    leafOnInput.value = toDateInputValue(obj.deciduousRange?.leafOn ?? '04-15');
+    leafOffInput.value = toDateInputValue(
+      obj.deciduousRange?.leafOff ?? '10-31',
+    );
+  }
+}
+
+function applyObjectPatch(patch: GardenObjectPatch): void {
+  if (selectedObjectIndex === null) return;
+  garden = updateObjectAt(garden, selectedObjectIndex, patch);
+  SCENES[activeScene]!.garden = garden;
+  update();
+}
+
+heightInput.addEventListener('change', () => {
+  const value = Number(heightInput.value);
+  if (Number.isFinite(value) && value > 0) applyObjectPatch({ heightM: value });
+});
+
+baseLevelInput.addEventListener('change', () => {
+  const value = Math.round(Number(baseLevelInput.value));
+  if (Number.isFinite(value)) applyObjectPatch({ baseLevel: value });
+});
+
+transmittanceInput.addEventListener('input', () => {
+  const value = Number(transmittanceInput.value);
+  transmittanceReadout.textContent = value.toFixed(2);
+  applyObjectPatch({ transmittance: value });
+});
+
+function applyDeciduousRange(): void {
+  if (selectedObjectIndex === null) return;
+  const obj = garden.objects[selectedObjectIndex];
+  if (!obj || obj.kind !== 'tree') return;
+  applyObjectPatch({
+    deciduousRange: {
+      leafOn: fromDateInputValue(leafOnInput.value),
+      leafOff: fromDateInputValue(leafOffInput.value),
+    },
+  });
+}
+
+leafOnInput.addEventListener('change', applyDeciduousRange);
+leafOffInput.addEventListener('change', applyDeciduousRange);
+
+deleteObjectButton.addEventListener('click', () => {
+  if (selectedObjectIndex === null) return;
+  garden = removeObjectAt(garden, selectedObjectIndex);
+  SCENES[activeScene]!.garden = garden;
+  deselectObject();
+  update();
+});
 
 // Row 1: time-of-day scrub
 const row1 = document.createElement('div');
@@ -273,7 +544,7 @@ const presetBtns = presets.map(({ preset, label }) => {
   btn.style.cursor = 'pointer';
   btn.addEventListener('click', () => {
     activePreset = preset;
-    row4.hidden = preset !== 'custom';
+    setRowHidden(row4, preset !== 'custom');
     update();
   });
   return btn;
@@ -283,7 +554,7 @@ const presetBtns = presets.map(({ preset, label }) => {
 const row4 = document.createElement('div');
 row4.style.cssText =
   'display: flex; align-items: center; gap: 8px; margin-bottom: 6px;';
-row4.hidden = true;
+setRowHidden(row4, true);
 
 const customStartLabel = document.createElement('label');
 customStartLabel.textContent = 'From:';
@@ -355,7 +626,7 @@ function update(): void {
     );
     renderHeatmap(start, end);
     heatmapButton.textContent = 'Scrub the day';
-    row3.hidden = false;
+    setRowHidden(row3, false);
     highlightActivePreset();
     const totalDays =
       Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
@@ -367,8 +638,8 @@ function update(): void {
   const hour = Number(slider.value);
   timeLabel.textContent = formatHour(hour);
   heatmapButton.textContent = 'Show sun-hours heatmap';
-  row3.hidden = true;
-  row4.hidden = true;
+  setRowHidden(row3, true);
+  setRowHidden(row4, true);
   readout.textContent = '';
   renderAtHour(hour);
 }
@@ -395,8 +666,11 @@ for (const picker of [customStartPicker, customEndPicker]) {
 }
 
 // --- Ground editing: drag-paint tiles in/out of the footprint ---------------
+// --- Object editing: drag a footprint rectangle, or click to select --------
 
 let isPaintingGround = false;
+let dragStartTile: { x: number; y: number } | null = null;
+let lastHoverTile: { x: number; y: number } | null = null;
 
 function applyGroundToolAt(clientX: number, clientY: number): void {
   const tile = renderer.pickTile(clientX, clientY);
@@ -410,24 +684,76 @@ function applyGroundToolAt(clientX: number, clientY: number): void {
   }
 }
 
+/** The axis-aligned footprint spanning a drag from `start` to `end`, inclusive. */
+function footprintFromDrag(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): { x: number; y: number; width: number; depth: number } {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x) + 1,
+    depth: Math.abs(end.y - start.y) + 1,
+  };
+}
+
+function handlePointerDown(clientX: number, clientY: number): void {
+  if (editorMode === 'ground') {
+    isPaintingGround = true;
+    applyGroundToolAt(clientX, clientY);
+    return;
+  }
+  const tile = renderer.pickTile(clientX, clientY);
+  if (!tile) return;
+  if (objectTool === 'select') {
+    selectObjectAt(tile.x, tile.y);
+    return;
+  }
+  dragStartTile = tile;
+  lastHoverTile = tile;
+}
+
+function handlePointerMove(clientX: number, clientY: number): void {
+  if (editorMode === 'ground') {
+    if (isPaintingGround) applyGroundToolAt(clientX, clientY);
+    return;
+  }
+  if (!dragStartTile) return;
+  const tile = renderer.pickTile(clientX, clientY);
+  if (tile) lastHoverTile = tile;
+}
+
+function handlePointerUp(): void {
+  isPaintingGround = false;
+  if (editorMode === 'object' && dragStartTile && objectTool !== 'select') {
+    const footprint = footprintFromDrag(
+      dragStartTile,
+      lastHoverTile ?? dragStartTile,
+    );
+    garden = placeObject(garden, objectTool, footprint);
+    SCENES[activeScene]!.garden = garden;
+    update();
+  }
+  dragStartTile = null;
+}
+
 canvas.style.touchAction = 'none';
 canvas.style.cursor = 'crosshair';
 
-canvas.addEventListener('pointerdown', (e) => {
-  isPaintingGround = true;
-  applyGroundToolAt(e.clientX, e.clientY);
-});
-canvas.addEventListener('pointermove', (e) => {
-  if (isPaintingGround) applyGroundToolAt(e.clientX, e.clientY);
-});
-window.addEventListener('pointerup', () => {
-  isPaintingGround = false;
-});
+canvas.addEventListener('pointerdown', (e) =>
+  handlePointerDown(e.clientX, e.clientY),
+);
+canvas.addEventListener('pointermove', (e) =>
+  handlePointerMove(e.clientX, e.clientY),
+);
+window.addEventListener('pointerup', handlePointerUp);
 
 // --- Assemble DOM ------------------------------------------------------------
 
 row0.append(sceneLabel, ...sceneBtns);
+editorRow.append(editorLabel, ...editorModeBtns.map(({ btn }) => btn));
 groundToolRow.append(groundToolLabel, ...groundToolBtns.map(({ btn }) => btn));
+objectToolRow.append(objectToolLabel, ...objectToolBtns.map(({ btn }) => btn));
 row1.append(slider, timeLabel, heatmapButton);
 row2.append(datePickerLabel, datePicker);
 row3.append(windowLabel, ...presetBtns);
@@ -438,8 +764,21 @@ row4.append(
   customEndPicker,
 );
 
-controls.append(row0, groundToolRow, row1, row2, row3, row4, readout);
+controls.append(
+  row0,
+  editorRow,
+  groundToolRow,
+  objectToolRow,
+  propertiesPanel,
+  row1,
+  row2,
+  row3,
+  row4,
+  readout,
+);
 canvas.insertAdjacentElement('afterend', controls);
 
 highlightActiveGroundTool();
+highlightActiveObjectTool();
+refreshEditorVisibility();
 update();
