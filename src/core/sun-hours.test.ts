@@ -106,6 +106,23 @@ describe('aggregateSunHours — single-day sun-hours per tile', () => {
     expect(sameSamplesTwoDays.hours[open]).toBeCloseTo(2.5);
   });
 
+  it('accrues about half the sun-hours under a 50%-transmittance canopy', () => {
+    // A tree over the middle tile of an otherwise open strip.
+    const tree: GardenObject = {
+      kind: 'tree',
+      footprint: { x: 1, y: 0, width: 1, depth: 1 },
+      baseLevel: 0,
+      heightM: 3,
+      transmittance: 0.5,
+    };
+    const open = aggregateSunHours(strip(3), arcDay());
+    const dappled = aggregateSunHours(strip(3, [tree]), arcDay());
+    const mid = tileIndex(3, 1, 0);
+
+    // Same open-sky exposure, halved by the canopy it sits under.
+    expect(dappled.hours[mid]).toBeCloseTo(open.hours[mid]! * 0.5);
+  });
+
   it('ignores samples taken while the sun is below the horizon', () => {
     const garden = strip(3);
     const night: DaySample[] = [
@@ -114,12 +131,13 @@ describe('aggregateSunHours — single-day sun-hours per tile', () => {
     const grid = aggregateSunHours(garden, night);
     expect([...grid.hours]).toEqual([0, 0, 0]);
   });
-
-
 });
 
 describe('sampleWindow — multi-day window sampling', () => {
-  const noon: SunAtDateTime = () => ({ azimuth: 180 * DEG, elevation: 60 * DEG });
+  const noon: SunAtDateTime = () => ({
+    azimuth: 180 * DEG,
+    elevation: 60 * DEG,
+  });
 
   it('picks representative days at the given interval and returns the count', () => {
     // June has 30 days; weekly sampling from June 1 → June 1, 8, 15, 22, 29 = 5 days.
@@ -192,7 +210,9 @@ describe('sampleWindow — multi-day window sampling', () => {
     const winterGrid = aggregateSunHours(garden, wS, wDC);
     const openTile = tileIndex(3, 1, 0);
 
-    expect(summerGrid.hours[openTile]).toBeGreaterThan(winterGrid.hours[openTile]!);
+    expect(summerGrid.hours[openTile]).toBeGreaterThan(
+      winterGrid.hours[openTile]!,
+    );
     // Open tile: no blockers → full daylight each sample day.
     expect(summerGrid.hours[openTile]).toBeCloseTo(10);
     expect(winterGrid.hours[openTile]).toBeCloseTo(4);

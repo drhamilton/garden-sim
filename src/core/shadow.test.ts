@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeLitGrid } from './shadow';
+import { computeSunFractionGrid } from './shadow';
 import type { Garden, GardenObject } from './types';
 import { tileIndex } from './types';
 
@@ -18,12 +18,14 @@ function strip(width: number, objects: GardenObject[] = []): Garden {
   };
 }
 
+/** Treats a tile as "lit" when it receives any direct sun (fraction > 0). */
 function litAt(garden: Garden, sun: { azimuth: number; elevation: number }) {
-  const grid = computeLitGrid(garden, sun);
-  return (x: number, y = 0) => grid.lit[tileIndex(garden.width, x, y)] === 1;
+  const grid = computeSunFractionGrid(garden, sun);
+  return (x: number, y = 0) =>
+    grid.fraction[tileIndex(garden.width, x, y)]! > 0;
 }
 
-describe('computeLitGrid — instantaneous shadow pass', () => {
+describe('computeSunFractionGrid — shadow geometry (opaque blockers)', () => {
   it('puts every tile in shadow when the sun is below the horizon', () => {
     const garden = strip(5, [
       {
@@ -33,11 +35,11 @@ describe('computeLitGrid — instantaneous shadow pass', () => {
         heightM: 3,
       },
     ]);
-    const grid = computeLitGrid(garden, {
+    const grid = computeSunFractionGrid(garden, {
       azimuth: 90 * DEG,
       elevation: -5 * DEG,
     });
-    expect([...grid.lit]).toEqual([0, 0, 0, 0, 0]);
+    expect([...grid.fraction]).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('casts a blocker shadow away from the sun (sun in the east → shadow to the west)', () => {
@@ -117,16 +119,104 @@ describe('computeLitGrid — instantaneous shadow pass', () => {
       latitude: 0,
       longitude: 0,
     };
-    const grid = computeLitGrid(garden, {
+    const grid = computeSunFractionGrid(garden, {
       azimuth: 90 * DEG,
       elevation: 20 * DEG,
     });
-    const lit = (y: number) => grid.lit[tileIndex(1, 0, y)] === 1;
+    const lit = (y: number) => grid.fraction[tileIndex(1, 0, y)]! > 0;
     // Rays march toward +y; tiles below the blocker (y<2) are shadowed.
     expect(lit(0)).toBe(false);
     expect(lit(1)).toBe(false);
     expect(lit(2)).toBe(false); // covered
     expect(lit(3)).toBe(true);
     expect(lit(4)).toBe(true);
+  });
+});
+
+/** A transmissive canopy of the given transmittance at column `x` on a strip. */
+function canopy(x: number, transmittance: number): GardenObject {
+  return {
+    kind: 'tree',
+    footprint: { x, y: 0, width: 1, depth: 1 },
+    baseLevel: 0,
+    heightM: 3,
+    transmittance,
+  };
+}
+
+function fractionAt(
+  garden: Garden,
+  sun: { azimuth: number; elevation: number },
+) {
+  const grid = computeSunFractionGrid(garden, sun);
+  return (x: number, y = 0) => grid.fraction[tileIndex(garden.width, x, y)]!;
+}
+
+describe('computeSunFractionGrid — dappled (fractional) shade', () => {
+  const highEast = { azimuth: 90 * DEG, elevation: 60 * DEG };
+  const lowEast = { azimuth: 90 * DEG, elevation: 10 * DEG };
+
+  it('gives an unobstructed tile the full light fraction', () => {
+    const fraction = fractionAt(strip(3), highEast);
+    expect(fraction(0)).toBeCloseTo(1);
+  });
+
+  it('gives a tile under a 50% canopy half the light of an open tile', () => {
+    // Tree at x=1; the tile under it sees light through the canopy only.
+    const garden = strip(3, [canopy(1, 0.5)]);
+    const fraction = fractionAt(garden, highEast);
+    expect(fraction(1)).toBeCloseTo(0.5);
+    // x=2 is east of the tree; with the sun in the east its ray marches away
+    // from the canopy → unobstructed.
+    expect(fraction(2)).toBeCloseTo(1);
+  });
+
+  it('combines distinct transmissive blockers multiplicatively', () => {
+    // Two separate 50% canopies east of x=0; a low sun's ray crosses both.
+    const garden = strip(5, [canopy(2, 0.5), canopy(3, 0.5)]);
+    const fraction = fractionAt(garden, lowEast);
+    expect(fraction(0)).toBeCloseTo(0.25);
+  });
+
+  it('attenuates by a multi-tile canopy once, not once per tile crossed', () => {
+    // One 50% tree three tiles wide. A grazing ray from x=0 passes through
+    // several of its tiles, but it is a single object → halved, not 0.5³.
+    const wideTree: GardenObject = {
+      kind: 'tree',
+      footprint: { x: 2, y: 0, width: 3, depth: 1 },
+      baseLevel: 0,
+      heightM: 3,
+      transmittance: 0.5,
+    };
+    const fraction = fractionAt(strip(6, [wideTree]), lowEast);
+    expect(fraction(0)).toBeCloseTo(0.5);
+  });
+
+  it('gives a fully opaque object hard-edged shadow — no light through it', () => {
+    const garden = strip(5, [
+      {
+        kind: 'building',
+        footprint: { x: 2, y: 0, width: 1, depth: 1 },
+        baseLevel: 0,
+        heightM: 3,
+      },
+    ]);
+    const fraction = fractionAt(garden, lowEast);
+    const lit = litAt(garden, lowEast);
+    // West of the opaque building: blocked → no light at all.
+    expect(fraction(0)).toBe(0);
+    expect(lit(0)).toBe(false);
+    // East of it: open → full light.
+    expect(fraction(4)).toBeCloseTo(1);
+    expect(lit(4)).toBe(true);
+  });
+
+  it('puts the whole grid in darkness when the sun is below the horizon', () => {
+    const garden = strip(3, [canopy(1, 0.5)]);
+    const grid = computeSunFractionGrid(garden, {
+      azimuth: 90 * DEG,
+      elevation: -5 * DEG,
+    });
+    expect([...grid.fraction]).toEqual([0, 0, 0]);
   });
 });

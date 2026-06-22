@@ -15,8 +15,12 @@ A discrete, stepped base elevation for a tile column (lawn = 0, raised deck = +1
 _Avoid_: Terrain, height (for ground), altitude
 
 **Garden object**:
-A light-blocking thing placed on the grid — a building, fence, or tree — with a footprint, a base level, and a height in metres. (Transmittance for dappled shade arrives in a later slice.)
+A light-blocking thing placed on the grid — a building, fence, or tree — with a footprint, a base level, a height in metres, and a light transmittance in [0,1] (0 = opaque, 1 = fully transparent). Transmissive objects (e.g. tree canopies) cast dappled shade.
 _Avoid_: Obstacle, entity, prop
+
+**Transmittance**:
+The fraction of light a garden object lets through, in [0,1] — 0 = opaque, 1 = fully transparent. A tree canopy at 0.5 passes half the sunlight, so tiles under it accrue fractional (dappled) sun-hours rather than full sun or full shade.
+_Avoid_: Opacity, alpha, density
 
 **Footprint**:
 The axis-aligned rectangle of tiles a garden object occupies, in tile units.
@@ -35,11 +39,11 @@ Where the sun is in the sky: azimuth (compass bearing clockwise from true north)
 _Avoid_: Sun angle, solar vector; "altitude" for elevation
 
 **Shadow pass**:
-The core computation that marks each tile lit or shadowed for a given sun position by ray-casting from the tile surface toward the sun. Binary in this slice; fractional (dappled) later.
+The core computation that, for a given sun position, ray-casts from each tile's surface toward the sun to find how much direct light it receives. Objects honour transmittance, so the result is fractional — not just lit/shadow. Both the instantaneous scrub view and the sun-hours heatmap are built on it.
 _Avoid_: Ray trace, occlusion test
 
-**Lit grid**:
-The per-tile lit/shadow result of the shadow pass.
+**Sun fraction grid**:
+The per-tile fraction of direct sunlight in [0,1] the shadow pass produces — 1 = unobstructed, 0 = opaque shadow, intermediate = dappled (the product of the transmittances of every object the ray passes through, each object counted once). Stacked/distinct transmissive blockers combine multiplicatively. The scrub view ramps tile colour by it directly; the sun-hours aggregation integrates it over time.
 
 **Sun-hours heatmap**:
 The aggregate result (a later slice): each tile's average sunlight hours per day over a time window. The contract the future plants module consumes.

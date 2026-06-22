@@ -21,7 +21,7 @@ import {
   aggregateSunHours,
   buildHeatmapScene,
   buildScene,
-  computeLitGrid,
+  computeSunFractionGrid,
   eraseTile,
   objectAt,
   paintTile,
@@ -146,7 +146,7 @@ const sunAtDateTime: SunAtDateTime = (date, hour) => {
 
 function renderAtHour(hour: number): void {
   const sun = sunAtHourOnDate(currentDate, hour);
-  renderer.render(buildScene(garden, computeLitGrid(garden, sun), sun));
+  renderer.render(buildScene(garden, computeSunFractionGrid(garden, sun), sun));
 }
 
 function renderHeatmap(startDate: Date, endDate: Date): void {
