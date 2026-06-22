@@ -100,6 +100,38 @@ describe('computeSunFractionGrid — shadow geometry (opaque blockers)', () => {
     expect(high(0)).toBe(true);
   });
 
+  it('rotates the shadow direction when the north rotation changes', () => {
+    // Slice 8: editing the north control must swing the shadow round. A central
+    // blocker on a 3×3 grid, sun due east. Unrotated, the eastward ray shadows
+    // the tile west of the blocker; rotated 90° clockwise the grid-relative sun
+    // bears along +y, so the shadow swings to the tile south of the blocker.
+    const blocker = (northRotation: number): Garden => ({
+      width: 3,
+      depth: 3,
+      groundLevels: new Array(9).fill(0),
+      objects: [
+        {
+          kind: 'building',
+          footprint: { x: 1, y: 1, width: 1, depth: 1 },
+          baseLevel: 0,
+          heightM: 3,
+        },
+      ],
+      northRotation,
+      latitude: 0,
+      longitude: 0,
+    });
+    const sun = { azimuth: 90 * DEG, elevation: 20 * DEG };
+
+    const unrotated = litAt(blocker(0), sun);
+    expect(unrotated(0, 1)).toBe(false); // west of blocker → shadowed
+    expect(unrotated(1, 0)).toBe(true); //  south of blocker → lit
+
+    const rotated = litAt(blocker(90 * DEG), sun);
+    expect(rotated(0, 1)).toBe(true); //  west of blocker → now lit
+    expect(rotated(1, 0)).toBe(false); // south of blocker → now shadowed
+  });
+
   it('honours north rotation — rotating the garden rotates the shadow', () => {
     // Sun due east. With the garden rotated 90° clockwise, the sun's
     // grid-relative bearing becomes 0 (grid +y), so the shadow falls along -y.

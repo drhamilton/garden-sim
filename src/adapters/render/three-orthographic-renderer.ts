@@ -10,7 +10,9 @@
 
 import {
   AmbientLight,
+  ArrowHelper,
   BoxGeometry,
+  CanvasTexture,
   Color,
   DirectionalLight,
   Group,
@@ -20,7 +22,10 @@ import {
   PlaneGeometry,
   Raycaster,
   Scene,
+  Sprite,
+  SpriteMaterial,
   Vector2,
+  Vector3,
   WebGLRenderer,
 } from 'three';
 import type { RendererPort } from '../../ports';
@@ -38,12 +43,34 @@ const OBJECT_COLORS: Record<string, number> = {
 
 const TILE_GAP = 0.04; // fraction of a tile left as a grid seam
 
+// North-marker placement, as fractions of the garden span / world units. The
+// arrow base sits beyond the grid's circumscribed circle (half-diagonal ≈
+// 0.707·span) so a rotated garden never reaches it; the camera framing widens
+// to keep the whole marker on screen.
+const NORTH_MARKER_RADIUS_FRAC = 0.74; // centre → arrow base
+const NORTH_MARKER_LENGTH_FRAC = 0.16; // arrow length
+const NORTH_MARKER_LABEL_GAP = 0.6; // tip → "N" label, world units
+const NORTH_MARKER_LABEL_HALF = 0.9; // ~half the label sprite, world units
+
+/** Outer world-distance from the grid centre the north marker occupies. */
+function northMarkerReach(span: number): number {
+  return (
+    span * (NORTH_MARKER_RADIUS_FRAC + NORTH_MARKER_LENGTH_FRAC) +
+    NORTH_MARKER_LABEL_GAP +
+    NORTH_MARKER_LABEL_HALF
+  );
+}
+
 export class ThreeOrthographicRenderer implements RendererPort {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
   private readonly camera: OrthographicCamera;
   private readonly sunLight = new DirectionalLight(0xffffff, 1.6);
   private readonly group = new Group();
+  /** Fixed true-north marker (lives outside `group`, so it never rotates). */
+  private readonly northIndicator = new Group();
+  /** Span the north marker was last built for; -1 until first built. */
+  private northMarkerSpan = -1;
   private readonly raycaster = new Raycaster();
   private readonly scratchColor = new Color();
   private tileMeshes: Mesh[] = [];
@@ -58,6 +85,7 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
     this.scene.add(this.group);
+    this.scene.add(this.northIndicator);
     this.scene.add(new AmbientLight(0xffffff, 0.55));
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
@@ -77,6 +105,7 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
   dispose(): void {
     this.disposeGroup();
+    this.clearNorthIndicator();
     this.renderer.dispose();
   }
 
@@ -97,6 +126,12 @@ export class ThreeOrthographicRenderer implements RendererPort {
     this.tileMeshes = [];
     this.tileCoordByMesh.clear();
 
+    // Lay every mesh out relative to the grid centre (and sit the whole group
+    // back at that centre, below) so north rotation spins the garden in place
+    // about its middle rather than swinging it around its corner out of frame.
+    const cx = scene.width / 2;
+    const cz = scene.depth / 2;
+
     const tileGeometry = new PlaneGeometry(1 - TILE_GAP, 1 - TILE_GAP);
     for (const tile of scene.tiles) {
       const material = new MeshStandardMaterial({
@@ -107,9 +142,9 @@ export class ThreeOrthographicRenderer implements RendererPort {
       const mesh = new Mesh(tileGeometry, material);
       mesh.rotation.x = -Math.PI / 2; // lay flat on the XZ plane
       mesh.position.set(
-        tile.x + 0.5,
+        tile.x + 0.5 - cx,
         tile.elevationM / scene.tileSizeM,
-        tile.y + 0.5,
+        tile.y + 0.5 - cz,
       );
       this.group.add(mesh);
       this.tileMeshes.push(mesh);
@@ -130,16 +165,105 @@ export class ThreeOrthographicRenderer implements RendererPort {
       });
       const mesh = new Mesh(geometry, material);
       mesh.position.set(
-        obj.footprint.x + obj.footprint.width / 2,
+        obj.footprint.x + obj.footprint.width / 2 - cx,
         baseTiles + heightTiles / 2,
-        obj.footprint.y + obj.footprint.depth / 2,
+        obj.footprint.y + obj.footprint.depth / 2 - cz,
       );
       this.group.add(mesh);
     }
 
-    // Orient the whole garden to true north and frame the camera.
+    // Sit the group at the grid centre so its local origin (the rotation pivot)
+    // coincides with the garden's middle; net world positions are unchanged at
+    // zero rotation. Then orient to true north and frame the camera.
+    this.group.position.set(cx, 0, cz);
     this.group.rotation.y = -scene.camera.northRotation;
+    this.rebuildNorthIndicator(scene);
     this.frameCamera(scene);
+  }
+
+  /**
+   * (Re)builds the fixed true-north marker: a needle pointing at world +Z
+   * (north in this scene's compass convention) with an "N" label, sitting
+   * outside the garden's footprint so the rotating model never collides with
+   * it. It stays put while the garden turns, so the model's orientation
+   * relative to true north reads at a glance. Drawn with depth-testing off so
+   * tall objects never hide it.
+   */
+  private rebuildNorthIndicator(scene: SceneDescription): void {
+    const span = Math.max(scene.width, scene.depth);
+    // The marker is fixed to true north and sized only by span, so a
+    // rotation-only rebuild can reuse it — skip recreating its canvas texture.
+    if (span === this.northMarkerSpan && this.northIndicator.children.length)
+      return;
+    this.northMarkerSpan = span;
+    this.clearNorthIndicator();
+    const cx = scene.width / 2;
+    const cz = scene.depth / 2;
+    const radius = span * NORTH_MARKER_RADIUS_FRAC;
+    const length = span * NORTH_MARKER_LENGTH_FRAC;
+
+    const base = new Vector3(cx, 0.5, cz + radius);
+    const arrow = new ArrowHelper(
+      new Vector3(0, 0, 1),
+      base,
+      length,
+      0xff5566,
+      length * 0.4,
+      length * 0.26,
+    );
+    for (const part of [arrow.line, arrow.cone]) {
+      const materials = Array.isArray(part.material)
+        ? part.material
+        : [part.material];
+      for (const material of materials) {
+        material.depthTest = false;
+        material.transparent = true;
+      }
+      part.renderOrder = 999;
+    }
+    this.northIndicator.add(arrow);
+
+    const label = this.makeNorthLabel();
+    label.position.set(cx, 0.5, cz + radius + length + NORTH_MARKER_LABEL_GAP);
+    this.northIndicator.add(label);
+  }
+
+  /** A camera-facing "N" sprite for the north marker. */
+  private makeNorthLabel(): Sprite {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = 'bold 44px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#10141c';
+    ctx.strokeText('N', size / 2, size / 2);
+    ctx.fillStyle = '#ff8a99';
+    ctx.fillText('N', size / 2, size / 2);
+
+    const material = new SpriteMaterial({
+      map: new CanvasTexture(canvas),
+      depthTest: false,
+      transparent: true,
+    });
+    const sprite = new Sprite(material);
+    sprite.scale.set(1.4, 1.4, 1.4);
+    sprite.renderOrder = 1000;
+    return sprite;
+  }
+
+  private clearNorthIndicator(): void {
+    for (const child of [...this.northIndicator.children]) {
+      this.northIndicator.remove(child);
+      if (child instanceof ArrowHelper) child.dispose();
+      else if (child instanceof Sprite) {
+        child.material.map?.dispose();
+        child.material.dispose();
+      }
+    }
   }
 
   private updateTileColors(scene: SceneDescription): void {
@@ -204,7 +328,10 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
   private frameCamera(scene: SceneDescription): void {
     const span = Math.max(scene.width, scene.depth);
-    const half = span * 0.75;
+    // Wide enough for the garden (and the north marker beyond it) at any
+    // rotation; a marker point at world-distance r projects to ≤ r on screen
+    // under the orthographic camera, so framing to its reach keeps it visible.
+    const half = Math.max(span * 0.75, northMarkerReach(span));
     const aspect = this.canvas.width / this.canvas.height;
     this.camera.left = -half * aspect;
     this.camera.right = half * aspect;
