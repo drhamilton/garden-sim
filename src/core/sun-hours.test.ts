@@ -115,23 +115,7 @@ describe('aggregateSunHours — single-day sun-hours per tile', () => {
     expect([...grid.hours]).toEqual([0, 0, 0]);
   });
 
-  it('locates the sunniest and shadiest tiles', () => {
-    const garden = strip(5, [
-      {
-        kind: 'building',
-        footprint: { x: 2, y: 0, width: 1, depth: 1 },
-        baseLevel: 0,
-        heightM: 5,
-      },
-    ]);
-    const grid = aggregateSunHours(garden, arcDay());
 
-    expect(grid.maxHours).toBe(grid.hours[grid.sunniestIndex]);
-    expect(grid.minHours).toBe(grid.hours[grid.shadiestIndex]);
-    expect(grid.maxHours).toBeGreaterThan(grid.minHours);
-    // The covered building tile is the shadiest.
-    expect(grid.shadiestIndex).toBe(tileIndex(garden.width, 2, 0));
-  });
 });
 
 describe('sampleWindow — multi-day window sampling', () => {

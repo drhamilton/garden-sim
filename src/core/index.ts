@@ -35,6 +35,5 @@ export type {
   SceneTile,
   SceneObject,
   SceneCamera,
-  TileHighlight,
 } from './scene';
 export { buildScene, buildHeatmapScene } from './scene';

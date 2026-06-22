@@ -134,10 +134,7 @@ function renderAtHour(hour: number): void {
   renderer.render(buildScene(garden, computeLitGrid(garden, sun), sun));
 }
 
-function renderHeatmap(
-  startDate: Date,
-  endDate: Date,
-): { minHours: number; maxHours: number } {
+function renderHeatmap(startDate: Date, endDate: Date): void {
   const { samples, dayCount } = sampleWindow(
     startDate,
     endDate,
@@ -147,7 +144,6 @@ function renderHeatmap(
   const grid = aggregateSunHours(garden, samples, dayCount);
   const noonSun = sunAtDateTime(startDate, 12);
   renderer.render(buildHeatmapScene(garden, grid, noonSun));
-  return { minHours: grid.minHours, maxHours: grid.maxHours };
 }
 
 // --- Minimal vanilla controls ------------------------------------------------
@@ -306,7 +302,7 @@ function update(): void {
     const customStart = new Date(`${customStartPicker.value}T00:00:00Z`);
     const customEnd = new Date(`${customEndPicker.value}T00:00:00Z`);
     const { start, end } = windowBounds(activePreset, refDate, customStart, customEnd);
-    const { minHours, maxHours } = renderHeatmap(start, end);
+    renderHeatmap(start, end);
     heatmapButton.textContent = 'Scrub the day';
     row3.hidden = false;
     highlightActivePreset();
@@ -314,9 +310,7 @@ function update(): void {
       Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
     const rangeStr = formatDateRange(start, end);
     const spanStr = totalDays === 1 ? '1 day' : `${totalDays} days`;
-    readout.textContent =
-      `Avg sun-hours/day over ${rangeStr} (${spanStr}) — ` +
-      `sunniest ${maxHours.toFixed(1)}h (gold), shadiest ${minHours.toFixed(1)}h (blue).`;
+    readout.textContent = `Avg sun-hours/day over ${rangeStr} (${spanStr}).`;
     return;
   }
   const hour = Number(slider.value);

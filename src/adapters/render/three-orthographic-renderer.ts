@@ -32,12 +32,6 @@ const OBJECT_COLORS: Record<string, number> = {
   tree: 0x6a994e,
 };
 
-// Heatmap highlights: the sunniest / shadiest tiles glow so they pop out.
-const SUNNIEST_GLOW = new Color(0xffe08a);
-const SHADIEST_GLOW = new Color(0x3a6ff0);
-const NO_GLOW = new Color(0x000000);
-const HIGHLIGHT_INTENSITY = 0.9;
-
 const TILE_GAP = 0.04; // fraction of a tile left as a grid seam
 
 export class ThreeOrthographicRenderer implements RendererPort {
@@ -144,23 +138,13 @@ export class ThreeOrthographicRenderer implements RendererPort {
     }
   }
 
-  /**
-   * Paints a tile's surface colour and highlight glow. In heatmap mode the tile
-   * carries a precomputed `colorHex`; otherwise it falls back to binary
-   * lit/shadow. The sunniest / shadiest tiles get an emissive glow.
-   */
   private applyTileAppearance(
     material: MeshStandardMaterial,
     tile: SceneTile,
   ): void {
     if (tile.colorHex != null) material.color.set(tile.colorHex);
     else material.color.copy(tile.lit ? LIT_COLOR : SHADOW_COLOR);
-
-    if (tile.highlight === 'sunniest') material.emissive.copy(SUNNIEST_GLOW);
-    else if (tile.highlight === 'shadiest')
-      material.emissive.copy(SHADIEST_GLOW);
-    else material.emissive.copy(NO_GLOW);
-    material.emissiveIntensity = tile.highlight ? HIGHLIGHT_INTENSITY : 0;
+    material.emissiveIntensity = 0;
   }
 
   private updateSun(scene: SceneDescription): void {
