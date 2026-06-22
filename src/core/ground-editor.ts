@@ -10,29 +10,30 @@ import { isTileActive, tileIndex } from './types';
 
 /** Adds the tile at (x, y) to the garden's footprint. Out-of-bounds is a no-op. */
 export function paintTile(garden: Garden, x: number, y: number): Garden {
-  return setTileActive(garden, x, y, true);
+  const idx = inBoundsIndex(garden, x, y);
+  if (idx === null || isTileActive(garden, idx)) return garden;
+  return { ...garden, active: withActiveAt(garden, idx, true) };
 }
 
 /** Removes the tile at (x, y) from the garden's footprint. Out-of-bounds is a no-op. */
 export function eraseTile(garden: Garden, x: number, y: number): Garden {
-  return setTileActive(garden, x, y, false);
+  const idx = inBoundsIndex(garden, x, y);
+  if (idx === null || !isTileActive(garden, idx)) return garden;
+  return { ...garden, active: withActiveAt(garden, idx, false) };
 }
 
-function setTileActive(
-  garden: Garden,
-  x: number,
-  y: number,
-  active: boolean,
-): Garden {
+/** Row-major index of (x, y), or null if it falls outside the garden's grid. */
+function inBoundsIndex(garden: Garden, x: number, y: number): number | null {
   const { width, depth } = garden;
-  if (x < 0 || x >= width || y < 0 || y >= depth) return garden;
+  if (x < 0 || x >= width || y < 0 || y >= depth) return null;
+  return tileIndex(width, x, y);
+}
 
-  const idx = tileIndex(width, x, y);
-  if (isTileActive(garden, idx) === active) return garden;
-
-  const nextActive = Array.from({ length: width * depth }, (_, i) =>
-    i === idx ? active : isTileActive(garden, i),
-  );
-
-  return { ...garden, active: nextActive };
+/** Copies the garden's active array with one tile's flag set, without touching the rest. */
+function withActiveAt(garden: Garden, idx: number, active: boolean): boolean[] {
+  const next = garden.active
+    ? garden.active.slice()
+    : new Array<boolean>(garden.width * garden.depth).fill(true);
+  next[idx] = active;
+  return next;
 }
