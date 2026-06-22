@@ -22,7 +22,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import type { RendererPort } from '../../ports';
-import type { SceneDescription } from '../../core';
+import type { SceneDescription, SceneTile } from '../../core';
 
 const LIT_COLOR = new Color(0xf4d35e);
 const SHADOW_COLOR = new Color(0x39465a);
@@ -31,6 +31,12 @@ const OBJECT_COLORS: Record<string, number> = {
   fence: 0x9c7a54,
   tree: 0x6a994e,
 };
+
+// Heatmap highlights: the sunniest / shadiest tiles glow so they pop out.
+const SUNNIEST_GLOW = new Color(0xffe08a);
+const SHADIEST_GLOW = new Color(0x3a6ff0);
+const NO_GLOW = new Color(0x000000);
+const HIGHLIGHT_INTENSITY = 0.9;
 
 const TILE_GAP = 0.04; // fraction of a tile left as a grid seam
 
@@ -84,10 +90,8 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
     const tileGeometry = new PlaneGeometry(1 - TILE_GAP, 1 - TILE_GAP);
     for (const tile of scene.tiles) {
-      const material = new MeshStandardMaterial({
-        color: tile.lit ? LIT_COLOR : SHADOW_COLOR,
-        roughness: 0.95,
-      });
+      const material = new MeshStandardMaterial({ roughness: 0.95 });
+      this.applyTileAppearance(material, tile);
       const mesh = new Mesh(tileGeometry, material);
       mesh.rotation.x = -Math.PI / 2; // lay flat on the XZ plane
       mesh.position.set(
@@ -130,9 +134,27 @@ export class ThreeOrthographicRenderer implements RendererPort {
       const mesh = this.tileMeshes[i];
       const tile = scene.tiles[i];
       if (!mesh || !tile) continue;
-      const material = mesh.material as MeshStandardMaterial;
-      material.color.copy(tile.lit ? LIT_COLOR : SHADOW_COLOR);
+      this.applyTileAppearance(mesh.material as MeshStandardMaterial, tile);
     }
+  }
+
+  /**
+   * Paints a tile's surface colour and highlight glow. In heatmap mode the tile
+   * carries a precomputed `colorHex`; otherwise it falls back to binary
+   * lit/shadow. The sunniest / shadiest tiles get an emissive glow.
+   */
+  private applyTileAppearance(
+    material: MeshStandardMaterial,
+    tile: SceneTile,
+  ): void {
+    if (tile.colorHex != null) material.color.set(tile.colorHex);
+    else material.color.copy(tile.lit ? LIT_COLOR : SHADOW_COLOR);
+
+    if (tile.highlight === 'sunniest') material.emissive.copy(SUNNIEST_GLOW);
+    else if (tile.highlight === 'shadiest')
+      material.emissive.copy(SHADIEST_GLOW);
+    else material.emissive.copy(NO_GLOW);
+    material.emissiveIntensity = tile.highlight ? HIGHLIGHT_INTENSITY : 0;
   }
 
   private updateSun(scene: SceneDescription): void {

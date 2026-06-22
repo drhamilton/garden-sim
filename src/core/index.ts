@@ -18,10 +18,14 @@ export { buildHeightfield } from './heightfield';
 export type { LitGrid } from './shadow';
 export { computeLitGrid } from './shadow';
 
+export type { DaySample, SunAt, SunHoursGrid } from './sun-hours';
+export { DEFAULT_STEP_HOURS, sampleDay, aggregateSunHours } from './sun-hours';
+
 export type {
   SceneDescription,
   SceneTile,
   SceneObject,
   SceneCamera,
+  TileHighlight,
 } from './scene';
-export { buildScene } from './scene';
+export { buildScene, buildHeatmapScene } from './scene';

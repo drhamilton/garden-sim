@@ -15,6 +15,10 @@ import type {
 } from './types';
 import { LEVEL_HEIGHT_M, TILE_SIZE_M, tileIndex } from './types';
 import type { LitGrid } from './shadow';
+import type { SunHoursGrid } from './sun-hours';
+
+/** Which extreme a heatmap tile holds, for the renderer to highlight. */
+export type TileHighlight = 'sunniest' | 'shadiest';
 
 export interface SceneTile {
   x: number;
@@ -22,6 +26,12 @@ export interface SceneTile {
   /** Ground surface height in metres. */
   elevationM: number;
   lit: boolean;
+  /** Heatmap mode: average sun-hours per day for this tile. */
+  sunHours?: number;
+  /** Heatmap mode: packed 0xRRGGBB heatmap colour, ramped by sun-hours. */
+  colorHex?: number;
+  /** Heatmap mode: set on the sunniest / shadiest tile. */
+  highlight?: TileHighlight;
 }
 
 export interface SceneObject {
@@ -52,26 +62,65 @@ export interface SceneDescription {
 
 /**
  * Builds the neutral scene description from a garden and a computed lit grid.
- * The grid must match the garden's dimensions.
+ * The grid must match the garden's dimensions. This is the instantaneous view —
+ * each tile carries binary lit/shadow state for a single sun position.
  */
 export function buildScene(
   garden: Garden,
   litGrid: LitGrid,
   sun: SunPosition,
 ): SceneDescription {
+  return sceneFor(garden, sun, (idx) => ({ lit: litGrid.lit[idx] === 1 }));
+}
+
+/**
+ * Builds the sun-hours heatmap scene from an aggregated grid. Each tile carries
+ * its average sun-hours, a colour ramped across the grid's range, and a flag on
+ * the sunniest / shadiest tile. `sun` is a representative position (e.g. solar
+ * noon) used only to light the extruded objects so heights still read.
+ */
+export function buildHeatmapScene(
+  garden: Garden,
+  grid: SunHoursGrid,
+  sun: SunPosition,
+): SceneDescription {
+  const range = grid.maxHours - grid.minHours;
+  return sceneFor(garden, sun, (idx) => {
+    const sunHours = grid.hours[idx] ?? 0;
+    const fraction = range > EPSILON ? (sunHours - grid.minHours) / range : 1;
+    return {
+      lit: sunHours > 0,
+      sunHours,
+      colorHex: heatmapColor(fraction),
+      highlight: highlightFor(grid, idx),
+    };
+  });
+}
+
+const EPSILON = 1e-9;
+
+/** Builds the shared scene envelope, filling each tile via `tileState`. */
+function sceneFor(
+  garden: Garden,
+  sun: SunPosition,
+  tileState: (idx: number) => Partial<SceneTile>,
+): SceneDescription {
   return {
     width: garden.width,
     depth: garden.depth,
     tileSizeM: TILE_SIZE_M,
-    tiles: sceneTiles(garden, litGrid),
+    tiles: sceneTiles(garden, tileState),
     objects: garden.objects.map(toSceneObject),
     camera: { kind: 'orthographic', northRotation: garden.northRotation },
     sun,
   };
 }
 
-/** One renderable tile per grid cell, carrying its position, elevation, and lit state. */
-function sceneTiles(garden: Garden, litGrid: LitGrid): SceneTile[] {
+/** One renderable tile per grid cell, carrying position, elevation, and per-mode state. */
+function sceneTiles(
+  garden: Garden,
+  tileState: (idx: number) => Partial<SceneTile>,
+): SceneTile[] {
   const { width, depth, groundLevels } = garden;
   const tiles: SceneTile[] = [];
   for (let y = 0; y < depth; y++) {
@@ -81,11 +130,37 @@ function sceneTiles(garden: Garden, litGrid: LitGrid): SceneTile[] {
         x,
         y,
         elevationM: (groundLevels[idx] ?? 0) * LEVEL_HEIGHT_M,
-        lit: litGrid.lit[idx] === 1,
+        lit: false,
+        ...tileState(idx),
       });
     }
   }
   return tiles;
+}
+
+/** Marks the sunniest / shadiest tile, or nothing for the rest. */
+function highlightFor(
+  grid: SunHoursGrid,
+  idx: number,
+): TileHighlight | undefined {
+  if (idx === grid.sunniestIndex) return 'sunniest';
+  if (idx === grid.shadiestIndex) return 'shadiest';
+  return undefined;
+}
+
+// Heatmap colour ramp: shadow blue → sun yellow, matching the renderer palette.
+const HEATMAP_SHADE = 0x39465a;
+const HEATMAP_SUN = 0xf4d35e;
+
+/** Packs a 0..1 sun-hours fraction into a 0xRRGGBB colour along the ramp. */
+function heatmapColor(fraction: number): number {
+  const t = Math.min(1, Math.max(0, fraction));
+  const lerp = (shift: number): number => {
+    const a = (HEATMAP_SHADE >> shift) & 0xff;
+    const b = (HEATMAP_SUN >> shift) & 0xff;
+    return Math.round(a + (b - a) * t);
+  };
+  return (lerp(16) << 16) | (lerp(8) << 8) | lerp(0);
 }
 
 /** Translates a garden object into its renderable form (levels → metres). */
