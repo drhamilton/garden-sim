@@ -30,6 +30,7 @@ import {
 } from 'three';
 import type { RendererPort } from '../../ports';
 import type { SceneDescription, SceneTile } from '../../core';
+import { sunMarkerPlacement } from './sun-marker';
 
 const LIT_COLOR = new Color(0xf4d35e);
 const SHADOW_COLOR = new Color(0x39465a);
@@ -61,6 +62,17 @@ function northMarkerReach(span: number): number {
   );
 }
 
+// Sun-marker placement, as fractions of the garden span. The marker rides a
+// sphere of radius span·RADIUS_FRAC about the grid centre, just beyond the
+// north marker so it reads as sitting "in the sky".
+const SUN_MARKER_RADIUS_FRAC = 0.95; // centre → sun marker
+const SUN_MARKER_SIZE_FRAC = 0.28; // billboard edge length
+
+/** Outer world-distance from the grid centre the sun marker can reach. */
+function sunMarkerReach(span: number): number {
+  return span * (SUN_MARKER_RADIUS_FRAC + SUN_MARKER_SIZE_FRAC / 2);
+}
+
 export class ThreeOrthographicRenderer implements RendererPort {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -69,6 +81,12 @@ export class ThreeOrthographicRenderer implements RendererPort {
   private readonly group = new Group();
   /** Fixed true-north marker (lives outside `group`, so it never rotates). */
   private readonly northIndicator = new Group();
+  /**
+   * Billboarded sun marker. Lives in world space (outside `group`), at the sun
+   * direction the light shines from, so the garden rotates beneath a sun fixed
+   * to true north — see {@link sunMarkerPlacement}.
+   */
+  private readonly sunMarker = makeSunSprite();
   /** Span the north marker was last built for; -1 until first built. */
   private northMarkerSpan = -1;
   private readonly raycaster = new Raycaster();
@@ -86,6 +104,7 @@ export class ThreeOrthographicRenderer implements RendererPort {
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
     this.scene.add(this.group);
     this.scene.add(this.northIndicator);
+    this.scene.add(this.sunMarker);
     this.scene.add(new AmbientLight(0xffffff, 0.55));
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
@@ -106,6 +125,8 @@ export class ThreeOrthographicRenderer implements RendererPort {
   dispose(): void {
     this.disposeGroup();
     this.clearNorthIndicator();
+    this.sunMarker.material.map?.dispose();
+    this.sunMarker.material.dispose();
     this.renderer.dispose();
   }
 
@@ -324,6 +345,27 @@ export class ThreeOrthographicRenderer implements RendererPort {
     );
     this.sunLight.target.position.set(0, 0, 0);
     this.sunLight.intensity = elevation > 0 ? 1.6 : 0;
+
+    this.updateSunMarker(scene);
+  }
+
+  /**
+   * Positions the visible sun marker at the current sun direction and hides it
+   * when the sun is below the horizon. Uses the true elevation (not the clamped
+   * value the light uses) so a marker low in the sky reads as low.
+   */
+  private updateSunMarker(scene: SceneDescription): void {
+    const span = Math.max(scene.width, scene.depth);
+    const placement = sunMarkerPlacement(
+      scene.sun,
+      { x: scene.width / 2, z: scene.depth / 2 },
+      span * SUN_MARKER_RADIUS_FRAC,
+    );
+    this.sunMarker.visible = placement.aboveHorizon;
+    const { x, y, z } = placement.position;
+    this.sunMarker.position.set(x, y, z);
+    const size = span * SUN_MARKER_SIZE_FRAC;
+    this.sunMarker.scale.set(size, size, size);
   }
 
   private frameCamera(scene: SceneDescription): void {
@@ -331,7 +373,11 @@ export class ThreeOrthographicRenderer implements RendererPort {
     // Wide enough for the garden (and the north marker beyond it) at any
     // rotation; a marker point at world-distance r projects to ≤ r on screen
     // under the orthographic camera, so framing to its reach keeps it visible.
-    const half = Math.max(span * 0.75, northMarkerReach(span));
+    const half = Math.max(
+      span * 0.75,
+      northMarkerReach(span),
+      sunMarkerReach(span),
+    );
     const aspect = this.canvas.width / this.canvas.height;
     this.camera.left = -half * aspect;
     this.camera.right = half * aspect;
@@ -358,4 +404,41 @@ export class ThreeOrthographicRenderer implements RendererPort {
       }
     }
   }
+}
+
+/**
+ * A camera-facing sun: a soft radial glow around a bright core, drawn with
+ * depth-testing off so tall objects never hide it. Position/scale/visibility
+ * are set per frame in {@link ThreeOrthographicRenderer.updateSunMarker}.
+ */
+function makeSunSprite(): Sprite {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const centre = size / 2;
+  const gradient = ctx.createRadialGradient(
+    centre,
+    centre,
+    0,
+    centre,
+    centre,
+    centre,
+  );
+  gradient.addColorStop(0, 'rgba(255, 247, 214, 1)');
+  gradient.addColorStop(0.35, 'rgba(255, 211, 94, 1)');
+  gradient.addColorStop(0.7, 'rgba(255, 176, 59, 0.55)');
+  gradient.addColorStop(1, 'rgba(255, 176, 59, 0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const material = new SpriteMaterial({
+    map: new CanvasTexture(canvas),
+    depthTest: false,
+    transparent: true,
+  });
+  const sprite = new Sprite(material);
+  sprite.renderOrder = 1001; // above the north marker (1000)
+  return sprite;
 }
