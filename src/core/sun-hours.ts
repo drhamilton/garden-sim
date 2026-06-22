@@ -20,8 +20,14 @@ import type { Garden, SunPosition } from './types';
 /** Default intra-day sampling step, in hours (15 minutes). */
 export const DEFAULT_STEP_HOURS = 0.25;
 
+/** Default interval between representative days when sampling a multi-day window. */
+export const DEFAULT_SAMPLE_INTERVAL_DAYS = 7;
+
 /** Looks up the sun's position a given number of hours into the day. */
 export type SunAt = (hoursIntoDay: number) => SunPosition;
+
+/** Looks up the sun's position for a specific date and time-of-day. */
+export type SunAtDateTime = (date: Date, hoursIntoDay: number) => SunPosition;
 
 /** One intra-day sample: the sun at an instant and the slice of day it covers. */
 export interface DaySample {
@@ -97,6 +103,47 @@ function accumulateLitTime(
   for (let i = 0; i < hours.length; i++) {
     if (lit[i] === 1) hours[i]! += weightHours;
   }
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Samples a multi-day window by picking representative days at `sampleIntervalDays`
+ * intervals and calling `sampleDay` for each. Returns the combined samples and a
+ * `dayCount` equal to the number of representative days — pass both to
+ * `aggregateSunHours` to get average sun-hours per day over the window.
+ */
+export function sampleWindow(
+  startDate: Date,
+  endDate: Date,
+  sunAt: SunAtDateTime,
+  sampleIntervalDays = DEFAULT_SAMPLE_INTERVAL_DAYS,
+  intraStepHours = DEFAULT_STEP_HOURS,
+): { samples: DaySample[]; dayCount: number } {
+  const dates = pickRepresentativeDays(startDate, endDate, sampleIntervalDays);
+  const samples: DaySample[] = [];
+  for (const date of dates) {
+    const sunAtForDay: SunAt = (h) => sunAt(date, h);
+    samples.push(...sampleDay(sunAtForDay, intraStepHours));
+  }
+  return { samples, dayCount: dates.length };
+}
+
+/** Selects one date every `intervalDays`, starting from `startDate`, up to `endDate`. */
+function pickRepresentativeDays(
+  startDate: Date,
+  endDate: Date,
+  intervalDays: number,
+): Date[] {
+  const dates: Date[] = [];
+  let current = startDate.getTime();
+  const end = endDate.getTime();
+  const step = intervalDays * MS_PER_DAY;
+  while (current <= end) {
+    dates.push(new Date(current));
+    current += step;
+  }
+  return dates;
 }
 
 /** The min/max sun-hours and the tiles that hold them. */
