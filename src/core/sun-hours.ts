@@ -10,11 +10,12 @@
 // real day from the solar port is the caller's job; `sampleDay` is a small,
 // port-agnostic helper for doing it.
 //
-// This slice integrates binary lit/shadow. Fractional (dappled) contributions
-// and cross-day windows arrive in later slices; the seam — weighted samples in,
-// per-day rate out — does not change.
+// Each sample's contribution is fractional: a tile under partly-transmissive
+// canopy accrues a fraction of that step's hours (see `computeSunFractionGrid`),
+// so dappled shade shows up as an intermediate sun-hours value. The seam —
+// weighted samples in, per-day rate out — is unchanged.
 
-import { computeLitGrid } from './shadow';
+import { computeSunFractionGrid } from './shadow';
 import type { Garden, SunPosition } from './types';
 
 /** Default intra-day sampling step, in hours (15 minutes). */
@@ -77,7 +78,7 @@ export function aggregateSunHours(
 
   for (const { sun, weightHours } of samples) {
     if (sun.elevation <= 0) continue; // night: nothing is lit
-    accumulateLitTime(hours, garden, sun, weightHours);
+    accumulateSunFraction(hours, garden, sun, weightHours);
   }
 
   if (dayCount !== 1) {
@@ -87,16 +88,20 @@ export function aggregateSunHours(
   return { width, depth, hours };
 }
 
-/** Adds `weightHours` to every tile the shadow pass marks lit for this sun. */
-function accumulateLitTime(
+/**
+ * Adds each tile's share of `weightHours` for this sun, scaled by the fraction
+ * of direct light it receives — 1 for open sky, 0 in opaque shadow, and an
+ * intermediate value under transmissive canopy (dappled shade).
+ */
+function accumulateSunFraction(
   hours: Float64Array,
   garden: Garden,
   sun: SunPosition,
   weightHours: number,
 ): void {
-  const { lit } = computeLitGrid(garden, sun);
+  const { fraction } = computeSunFractionGrid(garden, sun);
   for (let i = 0; i < hours.length; i++) {
-    if (lit[i] === 1) hours[i]! += weightHours;
+    hours[i]! += fraction[i]! * weightHours;
   }
 }
 
@@ -140,4 +145,3 @@ function pickRepresentativeDays(
   }
   return dates;
 }
-

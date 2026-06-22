@@ -26,8 +26,8 @@ export {
 export type { Heightfield } from './heightfield';
 export { buildHeightfield } from './heightfield';
 
-export type { LitGrid } from './shadow';
-export { computeLitGrid } from './shadow';
+export type { LitGrid, SunFractionGrid } from './shadow';
+export { computeLitGrid, computeSunFractionGrid } from './shadow';
 
 export type {
   DaySample,
