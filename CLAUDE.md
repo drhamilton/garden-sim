@@ -23,6 +23,14 @@ show).
 2. Run `npm run screenshot -- <name>` (one-time per checkout: `npx playwright
 install chromium`). PNGs land in `docs/screenshots/<name>/`.
 3. Commit the PNGs on the PR branch.
-4. Embed them in the PR body by raw URL — GitHub only renders images from a URL
-   it can fetch, and the branch's raw URL resolves as soon as it's pushed:
-   `https://raw.githubusercontent.com/drhamilton/garden-sim/<branch>/docs/screenshots/<name>/<shot>.png`
+4. Reference them from the PR body. **This repo is private**, so GitHub's image
+   proxy can't fetch raw URLs — inline `![](…)` embeds won't render. Instead
+   _link_ to the committed file's blob view, which works for authenticated
+   reviewers:
+   `https://github.com/drhamilton/garden-sim/blob/<branch>/docs/screenshots/<name>/<shot>.png`
+   (If the repo is ever made public, inline raw-URL embeds will start working:
+   `https://raw.githubusercontent.com/drhamilton/garden-sim/<branch>/docs/screenshots/<name>/<shot>.png`.)
+
+Editing the PR body with `gh pr edit` currently fails on this repo (a Projects
+classic deprecation warning aborts it); use `gh api -X PATCH
+repos/drhamilton/garden-sim/pulls/<n> -F body=@<file>` instead.
