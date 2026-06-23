@@ -171,6 +171,32 @@ function sunAtHourOnDate(dateStr: string, hour: number): SunPosition {
   return solar.getSunPosition({ ...gardenLocation(), date });
 }
 
+/** Minutes between samples of the day-arc the renderer draws across the sky. */
+const ARC_SAMPLE_MINUTES = 10;
+
+/**
+ * The sun's path across a whole day, sampled every {@link ARC_SAMPLE_MINUTES}
+ * for the renderer's sky-dome arc. Memoised by date + location so scrubbing the
+ * time-of-day slider (which keeps both fixed) reuses the same array rather than
+ * resampling SunCalc on every frame — and so the renderer can key off a stable
+ * arc and rebuild its geometry only when the day actually changes.
+ */
+let arcCache: { key: string; arc: SunPosition[] } | null = null;
+function sunArcForDate(dateStr: string): SunPosition[] {
+  const { latitude, longitude } = gardenLocation();
+  const key = `${dateStr}:${latitude}:${longitude}`;
+  if (arcCache?.key === key) return arcCache.arc;
+  // Step by integer sample index (not a float-accumulating hour) so the final
+  // sample lands exactly on hour 24 rather than drifting past it.
+  const steps = (24 * 60) / ARC_SAMPLE_MINUTES;
+  const arc: SunPosition[] = [];
+  for (let i = 0; i <= steps; i++) {
+    arc.push(sunAtHourOnDate(dateStr, (i * ARC_SAMPLE_MINUTES) / 60));
+  }
+  arcCache = { key, arc };
+  return arc;
+}
+
 /** SunAtDateTime adapter for sampleWindow: uses a Date object + fractional hour. */
 const sunAtDateTime: SunAtDateTime = (date, hour) => {
   const minutes = Math.round(hour * 60);
@@ -187,7 +213,12 @@ function renderAtHour(hour: number): void {
   // instantaneous view matches the season the heatmap would aggregate over.
   const seasonal = gardenForDate(garden, new Date(`${currentDate}T00:00:00Z`));
   renderer.render(
-    buildScene(seasonal, computeSunFractionGrid(seasonal, sun), sun),
+    buildScene(
+      seasonal,
+      computeSunFractionGrid(seasonal, sun),
+      sun,
+      sunArcForDate(currentDate),
+    ),
   );
 }
 
