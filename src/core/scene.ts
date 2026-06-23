@@ -55,6 +55,13 @@ export interface SceneDescription {
   camera: SceneCamera;
   /** The sun position this scene was lit by (for the renderer's light/debug). */
   sun: SunPosition;
+  /**
+   * The sun's path across the current day: chronologically-ordered sampled
+   * positions for the scene's date/location, for the renderer to draw as a
+   * sky-dome arc. A function of date/location only (not the scrubbed time), so
+   * the renderer can rebuild it lazily. Omitted in heatmap mode.
+   */
+  sunArc?: SunPosition[];
 }
 
 /**
@@ -63,16 +70,25 @@ export interface SceneDescription {
  * view — each tile carries the fraction of direct sun it receives at a single
  * sun position, ramped shade → sun so dappled (partly shaded) tiles read as an
  * intermediate colour. `lit` stays true for any tile receiving some direct sun.
+ *
+ * `sunArc`, if given, is the day's sampled sun path (date/location-dependent
+ * only) the renderer draws as a sky-dome arc.
  */
 export function buildScene(
   garden: Garden,
   fractionGrid: SunFractionGrid,
   sun: SunPosition,
+  sunArc?: SunPosition[],
 ): SceneDescription {
-  return sceneFor(garden, sun, (idx) => {
-    const fraction = fractionGrid.fraction[idx] ?? 0;
-    return { lit: fraction > EPSILON, colorHex: rampColor(fraction) };
-  });
+  return sceneFor(
+    garden,
+    sun,
+    (idx) => {
+      const fraction = fractionGrid.fraction[idx] ?? 0;
+      return { lit: fraction > EPSILON, colorHex: rampColor(fraction) };
+    },
+    sunArc,
+  );
 }
 
 /**
@@ -107,6 +123,7 @@ function sceneFor(
   garden: Garden,
   sun: SunPosition,
   tileState: (idx: number) => Partial<SceneTile>,
+  sunArc?: SunPosition[],
 ): SceneDescription {
   return {
     width: garden.width,
@@ -116,6 +133,7 @@ function sceneFor(
     objects: garden.objects.map(toSceneObject),
     camera: { kind: 'orthographic', northRotation: garden.northRotation },
     sun,
+    ...(sunArc !== undefined && { sunArc }),
   };
 }
 

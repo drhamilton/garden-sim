@@ -12,10 +12,13 @@ import {
   AmbientLight,
   ArrowHelper,
   BoxGeometry,
+  BufferGeometry,
   CanvasTexture,
   Color,
   DirectionalLight,
   Group,
+  Line,
+  LineBasicMaterial,
   Mesh,
   MeshStandardMaterial,
   OrthographicCamera,
@@ -29,8 +32,8 @@ import {
   WebGLRenderer,
 } from 'three';
 import type { RendererPort } from '../../ports';
-import type { SceneDescription, SceneTile } from '../../core';
-import { sunMarkerPlacement } from './sun-marker';
+import type { SceneDescription, SceneTile, SunPosition } from '../../core';
+import { sunArcPath, sunMarkerPlacement } from './sun-marker';
 
 const LIT_COLOR = new Color(0xf4d35e);
 const SHADOW_COLOR = new Color(0x39465a);
@@ -87,6 +90,14 @@ export class ThreeOrthographicRenderer implements RendererPort {
    * to true north — see {@link sunMarkerPlacement}.
    */
   private readonly sunMarker = makeSunSprite();
+  /**
+   * The sun's daily path, drawn as a faint polyline on the same sky dome the
+   * marker rides. Lives in world space (outside `group`) so it stays fixed to
+   * true north while the garden rotates beneath it — like {@link sunMarker}.
+   */
+  private readonly sunArcLine = makeSunArcLine();
+  /** Key of the arc the line geometry was last built for; rebuilt only on change. */
+  private sunArcKey = '';
   /** Span the north marker was last built for; -1 until first built. */
   private northMarkerSpan = -1;
   private readonly raycaster = new Raycaster();
@@ -104,6 +115,7 @@ export class ThreeOrthographicRenderer implements RendererPort {
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
     this.scene.add(this.group);
     this.scene.add(this.northIndicator);
+    this.scene.add(this.sunArcLine);
     this.scene.add(this.sunMarker);
     this.scene.add(new AmbientLight(0xffffff, 0.55));
     this.scene.add(this.sunLight);
@@ -125,6 +137,8 @@ export class ThreeOrthographicRenderer implements RendererPort {
   dispose(): void {
     this.disposeGroup();
     this.clearNorthIndicator();
+    this.sunArcLine.geometry.dispose();
+    this.sunArcLine.material.dispose();
     this.sunMarker.material.map?.dispose();
     this.sunMarker.material.dispose();
     this.renderer.dispose();
@@ -346,6 +360,7 @@ export class ThreeOrthographicRenderer implements RendererPort {
     this.sunLight.target.position.set(0, 0, 0);
     this.sunLight.intensity = elevation > 0 ? 1.6 : 0;
 
+    this.updateSunArc(scene);
     this.updateSunMarker(scene);
   }
 
@@ -366,6 +381,37 @@ export class ThreeOrthographicRenderer implements RendererPort {
     this.sunMarker.position.set(x, y, z);
     const size = span * SUN_MARKER_SIZE_FRAC;
     this.sunMarker.scale.set(size, size, size);
+  }
+
+  /**
+   * (Re)builds the sun's daily arc polyline from the scene's day-arc samples.
+   * The arc depends only on date/location (not the scrubbed time), so the
+   * geometry is rebuilt solely when those change — every scrub just reuses it.
+   * Hidden in heatmap mode (no arc supplied) and when the sun never clears the
+   * horizon. The arc rides the same dome the marker does, so the marker always
+   * sits on it.
+   */
+  private updateSunArc(scene: SceneDescription): void {
+    const arc = scene.sunArc;
+    const span = Math.max(scene.width, scene.depth);
+    if (!arc || arc.length === 0) {
+      this.sunArcLine.visible = false;
+      return;
+    }
+    const key = sunArcKeyOf(arc, span);
+    if (key !== this.sunArcKey) {
+      const points = sunArcPath(
+        arc,
+        { x: scene.width / 2, z: scene.depth / 2 },
+        span * SUN_MARKER_RADIUS_FRAC,
+      ).map((p) => new Vector3(p.x, p.y, p.z));
+      this.sunArcLine.geometry.dispose();
+      this.sunArcLine.geometry = new BufferGeometry().setFromPoints(points);
+      this.sunArcKey = key;
+    }
+    // A degenerate path (<2 points) has nothing to draw.
+    const drawn = this.sunArcLine.geometry.getAttribute('position');
+    this.sunArcLine.visible = (drawn?.count ?? 0) > 1;
   }
 
   private frameCamera(scene: SceneDescription): void {
@@ -441,4 +487,37 @@ function makeSunSprite(): Sprite {
   const sprite = new Sprite(material);
   sprite.renderOrder = 1001; // above the north marker (1000)
   return sprite;
+}
+
+/**
+ * A faint warm polyline for the sun's daily arc, drawn with depth-testing off
+ * so tall objects never hide it. Geometry is (re)built per arc change in
+ * {@link ThreeOrthographicRenderer.updateSunArc}.
+ */
+function makeSunArcLine(): Line<BufferGeometry, LineBasicMaterial> {
+  const material = new LineBasicMaterial({
+    color: 0xffd37a,
+    transparent: true,
+    opacity: 0.45,
+    depthTest: false,
+  });
+  const line = new Line(new BufferGeometry(), material);
+  line.renderOrder = 1000; // with the north label, beneath the sun (1001)
+  line.visible = false;
+  return line;
+}
+
+/**
+ * A cheap identity for a day-arc + dome size: its sample count and endpoints
+ * (sunrise/sunset positions) plus the span that scales the dome. Two different
+ * dates give different sunrise/sunset, so this changes exactly when the drawn
+ * arc would. North rotation is absent by design — the arc lives in the fixed
+ * world frame and the garden rotates beneath it, so rotation never reshapes it.
+ */
+function sunArcKeyOf(arc: SunPosition[], span: number): string {
+  const first = arc[0]!;
+  const last = arc[arc.length - 1]!;
+  const fmt = (p: SunPosition) =>
+    `${p.azimuth.toFixed(4)},${p.elevation.toFixed(4)}`;
+  return `${span}:${arc.length}:${fmt(first)}:${fmt(last)}`;
 }

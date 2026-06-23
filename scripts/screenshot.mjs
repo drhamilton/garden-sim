@@ -29,23 +29,25 @@ const name = process.argv[2] ?? 'app';
 const outDir = resolve(repoRoot, 'docs/screenshots', name);
 
 // --- The capture plan ------------------------------------------------------
-// Deciduous seasonality: the same deciduous tree casts denser shade in its
-// leaf-on season than once bare. We compare two adjacent dates straddling the
-// leaf-off date (10-31): mid-October (leaf-on) vs mid-November (bare), both at
-// the same mid-afternoon hour. Their sun is near-identical, so the change in the
-// tree's shadow isolates the foliage — dappled-dark with leaves, near-clear once
-// bare. `drive` selects the scene (instantaneous scrub view); each shot sets the
+// Sun sky-dome day-arc (#27): the sun's daily path is drawn as a faint arc
+// across the sky, and the marker rides it at the scrubbed time. We capture the
+// open garden on the summer solstice at three times — low morning sun, high
+// noon sun, low evening sun — so the arc reads as a fixed path while the marker
+// moves along it, and a dawn/dusk sun reads as low *in the sky* (early/late on
+// the arc) rather than sitting on the ground beside the model. `drive` selects
+// the obstacle-free scene so nothing competes with the arc; each shot sets the
 // date and time-of-day and captures the rendered frame.
 
-/** Selects the deciduous-tree scene; the scrub view stays in instantaneous mode. */
+/** Selects the open-garden scene; the scrub view stays in instantaneous mode. */
 async function drive(page) {
-  await clickButton(page, 'Deciduous tree');
+  await clickButton(page, 'Open garden');
   await page.waitForTimeout(200);
 }
 
 const SHOTS = [
-  { date: '2025-10-15', hour: 14, name: 'leaf-on-october' },
-  { date: '2025-11-15', hour: 14, name: 'leaf-off-november' },
+  { date: '2025-06-21', hour: 6, name: 'morning-low-sun' },
+  { date: '2025-06-21', hour: 12, name: 'noon-high-sun' },
+  { date: '2025-06-21', hour: 18, name: 'evening-low-sun' },
 ];
 // ---------------------------------------------------------------------------
 

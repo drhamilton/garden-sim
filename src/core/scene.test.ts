@@ -91,6 +91,30 @@ describe('buildScene — neutral scene description', () => {
     expect(scene.sun).toEqual(sun);
   });
 
+  it('omits the sun arc when none is supplied', () => {
+    const garden = gardenWithBuilding();
+    const sun = { azimuth: 120 * DEG, elevation: 35 * DEG };
+    const scene = buildScene(garden, computeSunFractionGrid(garden, sun), sun);
+    expect(scene.sunArc).toBeUndefined();
+  });
+
+  it('carries the supplied day-arc through to the scene', () => {
+    const garden = gardenWithBuilding();
+    const sun = { azimuth: 120 * DEG, elevation: 35 * DEG };
+    const arc = [
+      { azimuth: 90 * DEG, elevation: 5 * DEG },
+      { azimuth: 180 * DEG, elevation: 40 * DEG },
+      { azimuth: 270 * DEG, elevation: 5 * DEG },
+    ];
+    const scene = buildScene(
+      garden,
+      computeSunFractionGrid(garden, sun),
+      sun,
+      arc,
+    );
+    expect(scene.sunArc).toEqual(arc);
+  });
+
   it('marks every tile active by default, and erased tiles inactive', () => {
     const garden = eraseTile(gardenWithBuilding(), 1, 0);
     const sun = { azimuth: 90 * DEG, elevation: 20 * DEG };
