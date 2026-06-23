@@ -17,10 +17,13 @@ import {
   Color,
   DirectionalLight,
   Group,
+  InstancedBufferAttribute,
+  InstancedMesh,
   Line,
   LineBasicMaterial,
   Mesh,
   MeshStandardMaterial,
+  Object3D,
   OrthographicCamera,
   PlaneGeometry,
   Raycaster,
@@ -102,9 +105,17 @@ export class ThreeOrthographicRenderer implements RendererPort {
   private northMarkerSpan = -1;
   private readonly raycaster = new Raycaster();
   private readonly scratchColor = new Color();
-  private tileMeshes: Mesh[] = [];
-  /** The grid coordinate each tile mesh stands for, for pointer picking. */
-  private readonly tileCoordByMesh = new Map<Mesh, { x: number; y: number }>();
+  private readonly scratchTile = new Object3D();
+  /**
+   * The whole tile grid as one InstancedMesh — one instance per tile, rather
+   * than 10k separate meshes. Per-tile transform is baked once at rebuild; the
+   * scrubbed-frame work is just two instanced-buffer uploads (colour + opacity).
+   */
+  private tileMesh: InstancedMesh | null = null;
+  /** Per-instance opacity (active = 1, erased = {@link INACTIVE_OPACITY}). */
+  private tileOpacity: InstancedBufferAttribute | null = null;
+  /** The grid coordinate each instance stands for, indexed by `instanceId`. */
+  private tileCoords: { x: number; y: number }[] = [];
   private structureKey = '';
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -158,8 +169,9 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
   private rebuild(scene: SceneDescription): void {
     this.disposeGroup();
-    this.tileMeshes = [];
-    this.tileCoordByMesh.clear();
+    this.tileMesh = null;
+    this.tileOpacity = null;
+    this.tileCoords = [];
 
     // Lay every mesh out relative to the grid centre (and sit the whole group
     // back at that centre, below) so north rotation spins the garden in place
@@ -167,24 +179,34 @@ export class ThreeOrthographicRenderer implements RendererPort {
     const cx = scene.width / 2;
     const cz = scene.depth / 2;
 
+    const count = scene.tiles.length;
     const tileGeometry = new PlaneGeometry(1 - TILE_GAP, 1 - TILE_GAP);
-    for (const tile of scene.tiles) {
-      const material = new MeshStandardMaterial({
-        roughness: 0.95,
-        transparent: true,
-      });
-      this.applyTileAppearance(material, tile);
-      const mesh = new Mesh(tileGeometry, material);
-      mesh.rotation.x = -Math.PI / 2; // lay flat on the XZ plane
-      mesh.position.set(
+    const tileOpacity = new InstancedBufferAttribute(
+      new Float32Array(count),
+      1,
+    );
+    tileGeometry.setAttribute('instanceOpacity', tileOpacity);
+    const tileMesh = new InstancedMesh(tileGeometry, makeTileMaterial(), count);
+    this.tileMesh = tileMesh;
+    this.tileOpacity = tileOpacity;
+
+    this.scratchTile.rotation.x = -Math.PI / 2; // lay flat on the XZ plane
+    for (let tileIndex = 0; tileIndex < count; tileIndex++) {
+      const tile = scene.tiles[tileIndex]!;
+      this.scratchTile.position.set(
         tile.x + 0.5 - cx,
         tile.elevationM / scene.tileSizeM,
         tile.y + 0.5 - cz,
       );
-      this.group.add(mesh);
-      this.tileMeshes.push(mesh);
-      this.tileCoordByMesh.set(mesh, { x: tile.x, y: tile.y });
+      this.scratchTile.updateMatrix();
+      tileMesh.setMatrixAt(tileIndex, this.scratchTile.matrix);
+      this.writeTileAppearance(tileIndex, tile);
+      this.tileCoords.push({ x: tile.x, y: tile.y });
     }
+    tileMesh.instanceMatrix.needsUpdate = true;
+    if (tileMesh.instanceColor) tileMesh.instanceColor.needsUpdate = true;
+    tileOpacity.needsUpdate = true;
+    this.group.add(tileMesh);
 
     for (const obj of scene.objects) {
       const heightTiles = obj.heightM / scene.tileSizeM;
@@ -302,21 +324,26 @@ export class ThreeOrthographicRenderer implements RendererPort {
   }
 
   private updateTileColors(scene: SceneDescription): void {
-    for (let i = 0; i < this.tileMeshes.length; i++) {
-      const mesh = this.tileMeshes[i];
-      const tile = scene.tiles[i];
-      if (!mesh || !tile) continue;
-      this.applyTileAppearance(mesh.material as MeshStandardMaterial, tile);
+    const tileMesh = this.tileMesh;
+    if (!tileMesh) return;
+    for (let tileIndex = 0; tileIndex < this.tileCoords.length; tileIndex++) {
+      const tile = scene.tiles[tileIndex];
+      if (!tile) continue;
+      this.writeTileAppearance(tileIndex, tile);
     }
+    if (tileMesh.instanceColor) tileMesh.instanceColor.needsUpdate = true;
+    if (this.tileOpacity) this.tileOpacity.needsUpdate = true;
   }
 
-  private applyTileAppearance(
-    material: MeshStandardMaterial,
-    tile: SceneTile,
-  ): void {
-    material.color.copy(this.baseColorFor(tile));
-    material.opacity = tile.active ? 1 : INACTIVE_OPACITY;
-    material.emissiveIntensity = 0;
+  /**
+   * Writes one tile instance's colour (heatmap / lit / shadow / inactive) and
+   * opacity. The opacity rides a per-instance attribute the patched tile shader
+   * multiplies into the fragment alpha — see {@link makeTileMaterial} — since an
+   * InstancedMesh shares one material and so can't vary `material.opacity`.
+   */
+  private writeTileAppearance(tileIndex: number, tile: SceneTile): void {
+    this.tileMesh!.setColorAt(tileIndex, this.baseColorFor(tile));
+    this.tileOpacity!.setX(tileIndex, tile.active ? 1 : INACTIVE_OPACITY);
   }
 
   /** The tile's colour ignoring opacity: heatmap colour, lit/shadow, or inactive. */
@@ -336,9 +363,12 @@ export class ThreeOrthographicRenderer implements RendererPort {
       -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(pointerAsUnitSquareCoords, this.camera);
-    const hit = this.raycaster.intersectObjects(this.tileMeshes, false)[0];
-    if (!hit || !(hit.object instanceof Mesh)) return null;
-    return this.tileCoordByMesh.get(hit.object) ?? null;
+    if (!this.tileMesh) return null;
+    // Raycasting an InstancedMesh reports which instance was hit as `instanceId`,
+    // which indexes the tile grid in the order instances were built.
+    const hit = this.raycaster.intersectObject(this.tileMesh, false)[0];
+    if (!hit || hit.instanceId == null) return null;
+    return this.tileCoords[hit.instanceId] ?? null;
   }
 
   private updateSun(scene: SceneDescription): void {
@@ -450,6 +480,45 @@ export class ThreeOrthographicRenderer implements RendererPort {
       }
     }
   }
+}
+
+/**
+ * The shared material for the tile InstancedMesh. Tile albedo comes from each
+ * instance's colour (multiplied into the white base), but a single InstancedMesh
+ * has one material and so can't vary `material.opacity` — needed for the faded
+ * erased/inactive tiles. So we patch the standard shader to read a per-instance
+ * `instanceAlpha` attribute and multiply it into the fragment alpha, keeping the
+ * material `transparent` so that alpha actually blends.
+ */
+function makeTileMaterial(): MeshStandardMaterial {
+  const material = new MeshStandardMaterial({
+    roughness: 0.95,
+    transparent: true,
+  });
+  material.onBeforeCompile = patchPerInstanceOpacity;
+  return material;
+}
+
+/**
+ * Patches the standard shader to honour a per-instance `instanceOpacity` float
+ * attribute, multiplying it into the final fragment alpha. The vertex stage
+ * forwards the attribute to a varying; the fragment stage applies it after
+ * `<dithering_fragment>` (the end of the standard fragment program).
+ */
+function patchPerInstanceOpacity(shader: {
+  vertexShader: string;
+  fragmentShader: string;
+}): void {
+  shader.vertexShader =
+    `attribute float instanceOpacity;\nvarying float vInstanceOpacity;\n${shader.vertexShader}`.replace(
+      '#include <begin_vertex>',
+      'vInstanceOpacity = instanceOpacity;\n#include <begin_vertex>',
+    );
+  shader.fragmentShader =
+    `varying float vInstanceOpacity;\n${shader.fragmentShader}`.replace(
+      '#include <dithering_fragment>',
+      'gl_FragColor.a *= vInstanceOpacity;\n#include <dithering_fragment>',
+    );
 }
 
 /**
