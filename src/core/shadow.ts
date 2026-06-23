@@ -67,11 +67,31 @@ export function computeSunFractionGrid(
 ): SunFractionGrid {
   const { width, depth } = garden;
   const fraction = new Float64Array(width * depth);
-
   // Sun below the horizon → no direct light reaches anything (night).
-  if (sun.elevation <= 0) return { width, depth, fraction };
+  if (sun.elevation > 0) {
+    writeSunFractions(fraction, garden, buildHeightfield(garden), sun);
+  }
+  return { width, depth, fraction };
+}
 
-  const field = buildHeightfield(garden);
+/**
+ * Writes each tile's sun fraction into `out` for a **prebuilt** heightfield —
+ * the low-allocation path the sun-hours aggregation runs on its hot loop. The
+ * heightfield depends only on the garden, so a whole day's sun positions share
+ * one `field` and one `out` buffer instead of rebuilding/reallocating per
+ * sample. `out` must be length `width × depth` and is fully overwritten.
+ *
+ * The caller is responsible for skipping night (sun at or below the horizon),
+ * where every tile is dark — `aggregateSunHours` does, and `field` must be the
+ * heightfield of `garden` (its `northRotation`/objects drive the ray).
+ */
+export function writeSunFractions(
+  out: Float64Array,
+  garden: Garden,
+  field: Heightfield,
+  sun: SunPosition,
+): void {
+  const { width, depth } = field;
   const ray = sunRayFor(garden, sun);
   const maxDistance = Math.hypot(width, depth) + 1;
   // Per-object "last tile that attenuated by it" stamps, so a ray attenuates by
@@ -81,7 +101,7 @@ export function computeSunFractionGrid(
 
   for (let cy = 0; cy < depth; cy++) {
     for (let cx = 0; cx < width; cx++) {
-      fraction[tileIndex(width, cx, cy)] = sunFractionForTile(
+      out[tileIndex(width, cx, cy)] = sunFractionForTile(
         field,
         cx,
         cy,
@@ -91,8 +111,6 @@ export function computeSunFractionGrid(
       );
     }
   }
-
-  return { width, depth, fraction };
 }
 
 /**

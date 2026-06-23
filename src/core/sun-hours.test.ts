@@ -133,6 +133,41 @@ describe('aggregateSunHours — single-day sun-hours per tile', () => {
   });
 });
 
+describe('aggregateSunHours — progress reporting', () => {
+  it('reports monotonic progress that reaches the sample total', () => {
+    const garden = strip(3);
+    const samples = arcDay(); // 5 daylight + 1 night = 6 samples
+    const seen: Array<{ completed: number; total: number }> = [];
+    aggregateSunHours(garden, samples, 1, {
+      onProgress: (completed, total) => seen.push({ completed, total }),
+    });
+
+    expect(seen.length).toBeGreaterThan(0);
+    // Every callback names the same, correct total (all samples, night included).
+    expect(seen.every((p) => p.total === samples.length)).toBe(true);
+    // Completed only ever rises and ends having covered every sample.
+    const completed = seen.map((p) => p.completed);
+    expect(completed).toEqual([...completed].sort((a, b) => a - b));
+    expect(completed.at(-1)).toBe(samples.length);
+  });
+
+  it('produces the same grid whether or not progress is observed', () => {
+    const garden = strip(5, [
+      {
+        kind: 'building',
+        footprint: { x: 2, y: 0, width: 1, depth: 1 },
+        baseLevel: 0,
+        heightM: 5,
+      },
+    ]);
+    const plain = aggregateSunHours(garden, arcDay());
+    const observed = aggregateSunHours(garden, arcDay(), 1, {
+      onProgress: () => {},
+    });
+    expect([...observed.hours]).toEqual([...plain.hours]);
+  });
+});
+
 describe('aggregateSunHours — deciduous seasonality', () => {
   // A deciduous tree over the middle tile: dense (0.3) in leaf-on season,
   // sparse (0.9) once bare. Leaf-on Apr 15 → Oct 31.
