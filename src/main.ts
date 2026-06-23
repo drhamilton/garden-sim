@@ -18,7 +18,6 @@ import type {
 import {
   DEFAULT_SAMPLE_INTERVAL_DAYS,
   addDays,
-  aggregateSunHours,
   buildHeatmapScene,
   buildScene,
   computeSunFractionGrid,
@@ -32,7 +31,12 @@ import {
   updateObjectAt,
   windowBounds,
 } from './core';
-import { SunCalcSolarPosition, ThreeOrthographicRenderer } from './adapters';
+import {
+  SunCalcSolarPosition,
+  ThreeOrthographicRenderer,
+  WorkerSunHoursPort,
+  isSupersededError,
+} from './adapters';
 
 // --- Fixed scene inputs ------------------------------------------------------
 
@@ -153,6 +157,9 @@ if (!canvas) throw new Error('garden-sim: #garden-canvas element not found');
 
 const solar = new SunCalcSolarPosition();
 const renderer = new ThreeOrthographicRenderer(canvas);
+// Heatmap aggregation runs off the main thread so scrubbing stays smooth while a
+// season-long computation is in flight; the port supersedes stale requests.
+const sunHours = new WorkerSunHoursPort();
 
 /** Current date driving both scrub and heatmap modes. */
 let currentDate = '2025-06-21';
@@ -222,16 +229,49 @@ function renderAtHour(hour: number): void {
   );
 }
 
-function renderHeatmap(startDate: Date, endDate: Date): void {
+/** One-line summary of what an over-the-window heatmap shows. */
+function heatmapSummary(startDate: Date, endDate: Date): string {
+  const totalDays =
+    Math.round(
+      (endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000),
+    ) + 1;
+  const spanStr = totalDays === 1 ? '1 day' : `${totalDays} days`;
+  return `Avg sun-hours/day over ${formatDateRange(startDate, endDate)} (${spanStr}).`;
+}
+
+/**
+ * Computes the over-the-window heatmap off the main thread and renders it. The
+ * readout shows live progress while it runs, then the summary. A request issued
+ * while one is still in flight supersedes it; the stale one rejects and is
+ * ignored here, so only the latest heatmap ever lands.
+ */
+async function renderHeatmap(startDate: Date, endDate: Date): Promise<void> {
   const { samples, dayCount } = sampleWindow(
     startDate,
     endDate,
     sunAtDateTime,
     DEFAULT_SAMPLE_INTERVAL_DAYS,
   );
-  const grid = aggregateSunHours(garden, samples, dayCount);
+  // Capture the garden + sun now: the user may switch scenes mid-computation,
+  // and this scene must be rendered against the garden it was requested for.
+  const requestGarden = garden;
   const noonSun = sunAtDateTime(startDate, 12);
-  renderer.render(buildHeatmapScene(garden, grid, noonSun));
+  readout.textContent = 'Computing sun-hours… 0%';
+  try {
+    const grid = await sunHours.aggregate(
+      { garden: requestGarden, samples, dayCount },
+      ({ completed, total }) => {
+        const percent = Math.round((completed / total) * 100);
+        readout.textContent = `Computing sun-hours… ${percent}%`;
+      },
+    );
+    renderer.render(buildHeatmapScene(requestGarden, grid, noonSun));
+    readout.textContent = heatmapSummary(startDate, endDate);
+  } catch (error) {
+    if (isSupersededError(error)) return; // a newer request took over
+    readout.textContent = 'Sun-hours computation failed — see console.';
+    console.error('garden-sim: heatmap aggregation failed', error);
+  }
 }
 
 // --- Minimal vanilla controls ------------------------------------------------
@@ -831,15 +871,12 @@ function update(): void {
       customStart,
       customEnd,
     );
-    renderHeatmap(start, end);
     heatmapButton.textContent = 'Scrub the day';
     setRowHidden(row3, false);
     highlightActivePreset();
-    const totalDays =
-      Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-    const rangeStr = formatDateRange(start, end);
-    const spanStr = totalDays === 1 ? '1 day' : `${totalDays} days`;
-    readout.textContent = `Avg sun-hours/day over ${rangeStr} (${spanStr}).`;
+    // Fire-and-forget: renderHeatmap owns the readout (progress → summary) and
+    // swallows supersession when a newer request replaces this one.
+    void renderHeatmap(start, end);
     return;
   }
   const hour = Number(slider.value);

@@ -15,8 +15,10 @@
 // so dappled shade shows up as an intermediate sun-hours value. The seam —
 // weighted samples in, per-day rate out — is unchanged.
 
+import { buildHeightfield } from './heightfield';
+import type { Heightfield } from './heightfield';
 import { gardenForDate } from './seasonality';
-import { computeSunFractionGrid } from './shadow';
+import { writeSunFractions } from './shadow';
 import type { Garden, SunPosition } from './types';
 
 /** Default intra-day sampling step, in hours (15 minutes). */
@@ -53,6 +55,18 @@ export interface SunHoursGrid {
   hours: Float64Array;
 }
 
+/** Optional observers/tuning for {@link aggregateSunHours}. */
+export interface AggregateOptions {
+  /**
+   * Called once per processed sample with the running count and the total —
+   * a side-channel for driving a progress indicator while a long (season-long)
+   * aggregation runs off the main thread. The aggregation stays pure: the
+   * callback only observes, never steers. `completed` rises monotonically to
+   * `total` (every sample, night included).
+   */
+  onProgress?: (completed: number, total: number) => void;
+}
+
 /**
  * Samples a day at a fixed step, weighting each sample by the step it covers.
  * Night samples (sun below the horizon) are kept — they simply contribute zero
@@ -80,48 +94,57 @@ export function aggregateSunHours(
   garden: Garden,
   samples: DaySample[],
   dayCount = 1,
+  options: AggregateOptions = {},
 ): SunHoursGrid {
   const { width, depth } = garden;
-  const hours = new Float64Array(width * depth);
+  const tileCount = width * depth;
+  const hours = new Float64Array(tileCount);
+  // One scratch buffer reused for every sample's fraction grid, so the hot loop
+  // allocates nothing per sample (a season is hundreds of samples × 10k tiles).
+  const fraction = new Float64Array(tileCount);
 
-  // Resolve the garden's seasonal transmittances once per calendar day. Samples
-  // arrive grouped by day (see `sampleWindow`), so a single-entry cache spares
-  // us re-resolving on every intra-day step.
+  // Both the seasonal garden and its heightfield depend only on the calendar
+  // day, not the sun, so resolve them once per day and reuse across that day's
+  // intra-day samples (which arrive grouped by day — see `sampleWindow`).
   let cachedDate: Date | undefined;
   let cachedGarden = garden;
+  let cachedField: Heightfield = buildHeightfield(garden);
+
+  const { onProgress } = options;
+  let completed = 0;
 
   for (const { sun, weightHours, date } of samples) {
-    if (sun.elevation <= 0) continue; // night: nothing is lit
-    let effective = garden;
-    if (date) {
-      if (date !== cachedDate) {
-        cachedDate = date;
-        cachedGarden = gardenForDate(garden, date);
-      }
-      effective = cachedGarden;
+    if (date && date !== cachedDate) {
+      cachedDate = date;
+      cachedGarden = gardenForDate(garden, date);
+      cachedField = buildHeightfield(cachedGarden);
     }
-    accumulateSunFraction(hours, effective, sun, weightHours);
+    // Night (sun at or below the horizon) lights nothing, so skip its pass — but
+    // still count it toward progress, so `completed` reaches every sample.
+    if (sun.elevation > 0) {
+      writeSunFractions(fraction, cachedGarden, cachedField, sun);
+      accumulateSunFraction(hours, fraction, weightHours);
+    }
+    onProgress?.(++completed, samples.length);
   }
 
   if (dayCount !== 1) {
-    for (let i = 0; i < hours.length; i++) hours[i]! /= dayCount;
+    for (let i = 0; i < tileCount; i++) hours[i]! /= dayCount;
   }
 
   return { width, depth, hours };
 }
 
 /**
- * Adds each tile's share of `weightHours` for this sun, scaled by the fraction
- * of direct light it receives — 1 for open sky, 0 in opaque shadow, and an
- * intermediate value under transmissive canopy (dappled shade).
+ * Adds each tile's share of `weightHours` for one sample, scaled by the fraction
+ * of direct light it received. A named step over the typed-array hot path (the
+ * loop stays imperative for speed — see ADR-0002's performance carve-out).
  */
 function accumulateSunFraction(
   hours: Float64Array,
-  garden: Garden,
-  sun: SunPosition,
+  fraction: Float64Array,
   weightHours: number,
 ): void {
-  const { fraction } = computeSunFractionGrid(garden, sun);
   for (let i = 0; i < hours.length; i++) {
     hours[i]! += fraction[i]! * weightHours;
   }
