@@ -26,6 +26,10 @@ _Avoid_: Opacity, alpha, density
 The height (metres above an object's base) where its opaque lower part gives way to its transmissive upper part — for a tree, where the opaque trunk meets the dappling canopy. A ray crossing below it is blocked solidly; above it the ray passes the object's transmittance. Omitted means a uniform transmissive column (no trunk). Trunk and canopy share one footprint for now, so a tile directly under the tree dapples through the canopy rather than being trunk-blocked — a narrower trunk footprint is a later refinement.
 _Avoid_: Trunk height, crown base, split height
 
+**Deciduous range**:
+A tree's leaf-on/leaf-off season, as year-agnostic `MM-DD` dates plus a bare-season transmittance. The leaf-on season runs `[leafOn, leafOff)` (inclusive start, exclusive end, wrapping the year-end for the southern hemisphere): during it the canopy dapples at the object's `transmittance` (dense summer foliage); outside it the canopy passes the higher `leafOffTransmittance` (bare branches). A tree with no deciduous range is evergreen — one constant transmittance year-round. The shadow pass stays date-agnostic; `gardenForDate` resolves the effective transmittance before each sampled day, so a bed under a bare tree in early spring reads as sunnier than the same bed in midsummer.
+_Avoid_: Leaf cycle, phenology, dormancy
+
 **Footprint**:
 The axis-aligned rectangle of tiles a garden object occupies, in tile units.
 

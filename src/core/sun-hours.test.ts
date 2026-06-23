@@ -133,6 +133,68 @@ describe('aggregateSunHours — single-day sun-hours per tile', () => {
   });
 });
 
+describe('aggregateSunHours — deciduous seasonality', () => {
+  // A deciduous tree over the middle tile: dense (0.3) in leaf-on season,
+  // sparse (0.9) once bare. Leaf-on Apr 15 → Oct 31.
+  const decidTree: GardenObject = {
+    kind: 'tree',
+    footprint: { x: 1, y: 0, width: 1, depth: 1 },
+    baseLevel: 0,
+    heightM: 3,
+    transmittance: 0.3,
+    deciduousRange: {
+      leafOn: '04-15',
+      leafOff: '10-31',
+      leafOffTransmittance: 0.9,
+    },
+  };
+  // Sun always overhead so the only difference between windows is the canopy.
+  const overhead: SunAtDateTime = () => ({
+    azimuth: 180 * DEG,
+    elevation: 80 * DEG,
+  });
+  const mid = tileIndex(3, 1, 0);
+
+  function windowHours(start: string, end: string): number {
+    const garden = strip(3, [decidTree]);
+    const { samples, dayCount } = sampleWindow(
+      new Date(start),
+      new Date(end),
+      overhead,
+      7,
+      1,
+    );
+    return aggregateSunHours(garden, samples, dayCount).hours[mid]!;
+  }
+
+  it('gives a bare-season window more sun-hours under the tree than a leafy one', () => {
+    const bare = windowHours('2025-01-01', '2025-01-31'); // leaf-off
+    const leafy = windowHours('2025-07-01', '2025-07-31'); // leaf-on
+    expect(bare).toBeGreaterThan(leafy);
+    // Hours scale with transmittance: bare/leafy ≈ 0.9 / 0.3 = 3.
+    expect(bare / leafy).toBeCloseTo(3, 1);
+  });
+
+  it('treats an evergreen the same in every season', () => {
+    const evergreen: GardenObject = { ...decidTree, deciduousRange: undefined };
+    const measure = (start: string, end: string) => {
+      const { samples, dayCount } = sampleWindow(
+        new Date(start),
+        new Date(end),
+        overhead,
+        7,
+        1,
+      );
+      return aggregateSunHours(strip(3, [evergreen]), samples, dayCount).hours[
+        mid
+      ]!;
+    };
+    expect(measure('2025-01-01', '2025-01-31')).toBeCloseTo(
+      measure('2025-07-01', '2025-07-31'),
+    );
+  });
+});
+
 describe('sampleWindow — multi-day window sampling', () => {
   const noon: SunAtDateTime = () => ({
     azimuth: 180 * DEG,

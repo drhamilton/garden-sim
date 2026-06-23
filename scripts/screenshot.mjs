@@ -29,20 +29,23 @@ const name = process.argv[2] ?? 'app';
 const outDir = resolve(repoRoot, 'docs/screenshots', name);
 
 // --- The capture plan ------------------------------------------------------
-// Edit this for the change you're screenshotting: pick the scene to show and
-// the moments worth capturing. `drive` runs once before the shots; each shot
-// sets the time-of-day slider and saves the frame.
+// Deciduous seasonality: the same deciduous tree casts denser shade in its
+// leaf-on season than once bare. We compare two adjacent dates straddling the
+// leaf-off date (10-31): mid-October (leaf-on) vs mid-November (bare), both at
+// the same mid-afternoon hour. Their sun is near-identical, so the change in the
+// tree's shadow isolates the foliage — dappled-dark with leaves, near-clear once
+// bare. `drive` selects the scene (instantaneous scrub view); each shot sets the
+// date and time-of-day and captures the rendered frame.
 
-/** Selects a named scene from the top button row. */
+/** Selects the deciduous-tree scene; the scrub view stays in instantaneous mode. */
 async function drive(page) {
-  await clickButton(page, 'Building + tree');
+  await clickButton(page, 'Deciduous tree');
+  await page.waitForTimeout(200);
 }
 
 const SHOTS = [
-  { hour: 6, name: 'morning' },
-  { hour: 12, name: 'noon' },
-  { hour: 18, name: 'evening' },
-  { hour: 2, name: 'night' },
+  { date: '2025-10-15', hour: 14, name: 'leaf-on-october' },
+  { date: '2025-11-15', hour: 14, name: 'leaf-off-november' },
 ];
 // ---------------------------------------------------------------------------
 
@@ -53,7 +56,17 @@ async function main() {
   const server = startDevServer();
   try {
     await waitForServer(BASE_URL);
-    const browser = await chromium.launch({ args: ['--no-sandbox'] });
+    // Software GL (swiftshader): the heatmap scene's per-tile meshes lose a
+    // hardware WebGL context in headless Chromium; software rendering is stable
+    // and deterministic for captures.
+    const browser = await chromium.launch({
+      args: [
+        '--no-sandbox',
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+      ],
+    });
     try {
       const page = await browser.newPage({
         viewport: { width: 1100, height: 900 },
@@ -66,12 +79,15 @@ async function main() {
       await drive(page);
 
       for (const shot of SHOTS) {
-        await captureCanvasAtHour(
+        await captureScrubFrame(
           page,
+          shot.date,
           shot.hour,
           `${outDir}/${shot.name}.png`,
         );
-        console.log(`captured ${name}/${shot.name}.png @ hour ${shot.hour}`);
+        console.log(
+          `captured ${name}/${shot.name}.png @ ${shot.date} ${shot.hour}:00`,
+        );
       }
 
       if (errors.length) {
@@ -86,8 +102,17 @@ async function main() {
   }
 }
 
-/** Sets the time-of-day slider and writes the rendered canvas to `path`. */
-async function captureCanvasAtHour(page, hour, path) {
+/**
+ * Sets the date, then the time-of-day slider, and writes the rendered scrub
+ * frame to `path`. The slider's "input" handler renders synchronously, so we
+ * read `toDataURL` in that same task to beat the WebGL buffer clear.
+ */
+async function captureScrubFrame(page, date, hour, path) {
+  await page.evaluate((d) => {
+    const picker = document.querySelector('#garden-date');
+    picker.value = d;
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+  }, date);
   const dataUrl = await page.evaluate((h) => {
     const slider = document.querySelector('input[aria-label="Time of day"]');
     slider.value = String(h);

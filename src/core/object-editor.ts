@@ -25,7 +25,11 @@ const KIND_DEFAULTS: Record<
     heightM: 5,
     transmittance: 0.5,
     canopyBaseM: 2,
-    deciduousRange: { leafOn: '04-15', leafOff: '10-31' },
+    deciduousRange: {
+      leafOn: '04-15',
+      leafOff: '10-31',
+      leafOffTransmittance: 0.85,
+    },
   },
 };
 
