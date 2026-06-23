@@ -111,13 +111,21 @@ describe('object editor use-cases', () => {
       heightM: 6.5,
       baseLevel: 1,
       transmittance: 0.3,
-      deciduousRange: { leafOn: '04-15', leafOff: '10-31' },
+      deciduousRange: {
+        leafOn: '04-15',
+        leafOff: '10-31',
+        leafOffTransmittance: 0.85,
+      },
     });
     expect(updated.objects[0]).toMatchObject({
       heightM: 6.5,
       baseLevel: 1,
       transmittance: 0.3,
-      deciduousRange: { leafOn: '04-15', leafOff: '10-31' },
+      deciduousRange: {
+        leafOn: '04-15',
+        leafOff: '10-31',
+        leafOffTransmittance: 0.85,
+      },
     });
     // Original is untouched.
     expect(placed.objects[0]!.heightM).not.toBe(6.5);

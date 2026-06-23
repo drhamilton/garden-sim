@@ -23,6 +23,7 @@ import {
   buildScene,
   computeSunFractionGrid,
   eraseTile,
+  gardenForDate,
   objectAt,
   paintTile,
   placeObject,
@@ -106,6 +107,37 @@ const SCENES: Array<{ name: string; description: string; garden: Garden }> = [
         footprint: { x: 3, y: 3, width: 2, depth: 2 },
         baseLevel: 0,
         heightM: 5,
+        transmittance: 0.4,
+        canopyBaseM: 2,
+        deciduousRange: {
+          leafOn: '04-15',
+          leafOff: '10-31',
+          leafOffTransmittance: 0.85,
+        },
+      },
+    ]),
+  },
+  {
+    // A single deciduous tree on an open grid — the only shade source, so its
+    // shadow makes the seasonal change vivid: dappled-dark in the leaf-on
+    // season, near-clear once the leaves drop. Modelled as a uniform
+    // transmissive canopy (no opaque trunk) so the whole shadow dapples by the
+    // seasonal transmittance rather than a season-independent trunk core.
+    name: 'Deciduous tree',
+    description:
+      'One deciduous tree on open ground — dense canopy in leaf-on season, sparse once bare.',
+    garden: baseGarden([
+      {
+        kind: 'tree',
+        footprint: { x: 5, y: 5, width: 3, depth: 3 },
+        baseLevel: 0,
+        heightM: 5,
+        transmittance: 0.3,
+        deciduousRange: {
+          leafOn: '04-15',
+          leafOff: '10-31',
+          leafOffTransmittance: 0.9,
+        },
       },
     ]),
   },
@@ -151,7 +183,12 @@ const sunAtDateTime: SunAtDateTime = (date, hour) => {
 
 function renderAtHour(hour: number): void {
   const sun = sunAtHourOnDate(currentDate, hour);
-  renderer.render(buildScene(garden, computeSunFractionGrid(garden, sun), sun));
+  // Resolve deciduous trees' seasonal transmittance for the scrubbed date so the
+  // instantaneous view matches the season the heatmap would aggregate over.
+  const seasonal = gardenForDate(garden, new Date(`${currentDate}T00:00:00Z`));
+  renderer.render(
+    buildScene(seasonal, computeSunFractionGrid(seasonal, sun), sun),
+  );
 }
 
 function renderHeatmap(startDate: Date, endDate: Date): void {
@@ -378,7 +415,8 @@ canopyBaseRow.append(canopyBaseInput);
 setRowHidden(canopyBaseRow, true);
 
 const deciduousRow = document.createElement('div');
-deciduousRow.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+deciduousRow.style.cssText =
+  'display: flex; flex-wrap: wrap; align-items: center; gap: 6px;';
 setRowHidden(deciduousRow, true);
 
 const leafOnLabel = document.createElement('label');
@@ -391,7 +429,29 @@ leafOffLabel.append('Leaf-off:');
 const leafOffInput = document.createElement('input');
 leafOffInput.type = 'date';
 
-deciduousRow.append(leafOnLabel, leafOnInput, leafOffLabel, leafOffInput);
+// The bare-season canopy: how much light the tree lets through once leaves drop.
+const leafOffTransmittanceLabel = document.createElement('label');
+leafOffTransmittanceLabel.style.cssText =
+  'display: flex; align-items: center; gap: 6px;';
+leafOffTransmittanceLabel.append('Bare transmittance:');
+const leafOffTransmittanceInput = document.createElement('input');
+leafOffTransmittanceInput.type = 'range';
+leafOffTransmittanceInput.min = '0';
+leafOffTransmittanceInput.max = '1';
+leafOffTransmittanceInput.step = '0.05';
+const leafOffTransmittanceReadout = document.createElement('span');
+leafOffTransmittanceLabel.append(
+  leafOffTransmittanceInput,
+  leafOffTransmittanceReadout,
+);
+
+deciduousRow.append(
+  leafOnLabel,
+  leafOnInput,
+  leafOffLabel,
+  leafOffInput,
+  leafOffTransmittanceLabel,
+);
 
 const deleteObjectButton = document.createElement('button');
 deleteObjectButton.type = 'button';
@@ -457,6 +517,9 @@ function refreshPropertiesPanel(): void {
     leafOffInput.value = toDateInputValue(
       obj.deciduousRange?.leafOff ?? '10-31',
     );
+    const bare = obj.deciduousRange?.leafOffTransmittance ?? 0.85;
+    leafOffTransmittanceInput.value = String(bare);
+    leafOffTransmittanceReadout.textContent = bare.toFixed(2);
   }
 }
 
@@ -497,12 +560,19 @@ function applyDeciduousRange(): void {
     deciduousRange: {
       leafOn: fromDateInputValue(leafOnInput.value),
       leafOff: fromDateInputValue(leafOffInput.value),
+      leafOffTransmittance: Number(leafOffTransmittanceInput.value),
     },
   });
 }
 
 leafOnInput.addEventListener('change', applyDeciduousRange);
 leafOffInput.addEventListener('change', applyDeciduousRange);
+leafOffTransmittanceInput.addEventListener('input', () => {
+  leafOffTransmittanceReadout.textContent = Number(
+    leafOffTransmittanceInput.value,
+  ).toFixed(2);
+  applyDeciduousRange();
+});
 
 deleteObjectButton.addEventListener('click', () => {
   if (selectedObjectIndex === null) return;

@@ -15,6 +15,7 @@
 // so dappled shade shows up as an intermediate sun-hours value. The seam —
 // weighted samples in, per-day rate out — is unchanged.
 
+import { gardenForDate } from './seasonality';
 import { computeSunFractionGrid } from './shadow';
 import type { Garden, SunPosition } from './types';
 
@@ -35,6 +36,13 @@ export interface DaySample {
   sun: SunPosition;
   /** Hours of the day this sample represents (the intra-day step). */
   weightHours: number;
+  /**
+   * The calendar day this sample belongs to, used to resolve deciduous trees'
+   * seasonal transmittance. Omitted means season-agnostic (every object uses
+   * its constant transmittance) — the case for a single `sampleDay` call with
+   * no date context.
+   */
+  date?: Date;
 }
 
 /** Per-tile average sun-hours per day. */
@@ -76,9 +84,23 @@ export function aggregateSunHours(
   const { width, depth } = garden;
   const hours = new Float64Array(width * depth);
 
-  for (const { sun, weightHours } of samples) {
+  // Resolve the garden's seasonal transmittances once per calendar day. Samples
+  // arrive grouped by day (see `sampleWindow`), so a single-entry cache spares
+  // us re-resolving on every intra-day step.
+  let cachedDate: Date | undefined;
+  let cachedGarden = garden;
+
+  for (const { sun, weightHours, date } of samples) {
     if (sun.elevation <= 0) continue; // night: nothing is lit
-    accumulateSunFraction(hours, garden, sun, weightHours);
+    let effective = garden;
+    if (date) {
+      if (date !== cachedDate) {
+        cachedDate = date;
+        cachedGarden = gardenForDate(garden, date);
+      }
+      effective = cachedGarden;
+    }
+    accumulateSunFraction(hours, effective, sun, weightHours);
   }
 
   if (dayCount !== 1) {
@@ -124,7 +146,11 @@ export function sampleWindow(
   const samples: DaySample[] = [];
   for (const date of dates) {
     const sunAtForDay: SunAt = (h) => sunAt(date, h);
-    samples.push(...sampleDay(sunAtForDay, intraStepHours));
+    // Tag each intra-day sample with its day so the aggregation can resolve
+    // deciduous trees' seasonal transmittance.
+    for (const sample of sampleDay(sunAtForDay, intraStepHours)) {
+      samples.push({ ...sample, date });
+    }
   }
   return { samples, dayCount: dates.length };
 }

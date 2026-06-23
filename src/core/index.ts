@@ -29,6 +29,8 @@ export { buildHeightfield } from './heightfield';
 export type { SunFractionGrid } from './shadow';
 export { computeSunFractionGrid } from './shadow';
 
+export { isLeafOn, effectiveTransmittance, gardenForDate } from './seasonality';
+
 export type {
   DaySample,
   SunAt,

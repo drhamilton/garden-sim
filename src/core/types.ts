@@ -39,13 +39,23 @@ export interface Footprint {
 export type GardenObjectKind = 'building' | 'fence' | 'tree';
 
 /**
- * A deciduous tree's leaf-on/leaf-off date range, as `MM-DD` strings
- * (inclusive, year-agnostic). Stored on the model but not yet honoured by
- * the engine — the shadow pass treats every object as opaque regardless.
+ * A deciduous tree's leaf-on/leaf-off season, as year-agnostic `MM-DD` strings.
+ * The leaf-on season runs from `leafOn` (inclusive) up to `leafOff` (exclusive),
+ * wrapping the year-end if `leafOff` precedes `leafOn` (southern hemisphere).
+ * During the leaf-on season the tree dapples at the object's `transmittance`
+ * (the dense summer canopy); during the bare leaf-off season it passes
+ * `leafOffTransmittance` instead. The sun-hours aggregation selects the
+ * appropriate value per sampled day (see `gardenForDate`).
  */
 export interface DeciduousRange {
   leafOn: string;
   leafOff: string;
+  /**
+   * Light transmittance in [0,1] during the bare leaf-off season — typically
+   * higher than the leaf-on `transmittance`, so a bed under a bare tree reads
+   * as sunnier than the same bed in midsummer.
+   */
+  leafOffTransmittance: number;
 }
 
 /** An object placed on the grid that blocks sunlight. */
@@ -71,7 +81,12 @@ export interface GardenObject {
    * with no opaque trunk. Clamped to `heightM` by the shadow pass.
    */
   canopyBaseM?: number;
-  /** Trees only: deciduous leaf-on/leaf-off range. */
+  /**
+   * Trees only: deciduous leaf-on/leaf-off season. Present means the effective
+   * transmittance is date-dependent (leaf-on `transmittance` vs the range's
+   * `leafOffTransmittance`); omitted means evergreen — a single constant
+   * `transmittance` regardless of date.
+   */
   deciduousRange?: DeciduousRange;
 }
 
