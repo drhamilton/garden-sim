@@ -7,6 +7,7 @@
 
 import { aggregateSunHours } from '../../core';
 import type { SunHoursRequest } from '../../ports/sun-hours-port';
+import { measureSync } from '../perf/user-timing';
 
 /**
  * The slice of the dedicated worker global we use. We avoid the `webworker` TS
@@ -26,16 +27,20 @@ ctx.onmessage = (event: MessageEvent<SunHoursRequest>) => {
   const { garden, samples, dayCount } = event.data;
 
   let lastPost = 0;
-  const grid = aggregateSunHours(garden, samples, dayCount, {
-    onProgress: (completed, total) => {
-      const now = performance.now();
-      // Always post the final tick; throttle the rest by wall-clock time.
-      if (completed === total || now - lastPost >= PROGRESS_THROTTLE_MS) {
-        lastPost = now;
-        ctx.postMessage({ type: 'progress', completed, total });
-      }
-    },
-  });
+  // Wrapped in a User Timing span so the aggregation shows up as a labelled bar
+  // under this worker's thread in the DevTools Performance panel.
+  const { result: grid } = measureSync('heatmap-aggregate (worker)', () =>
+    aggregateSunHours(garden, samples, dayCount, {
+      onProgress: (completed, total) => {
+        const now = performance.now();
+        // Always post the final tick; throttle the rest by wall-clock time.
+        if (completed === total || now - lastPost >= PROGRESS_THROTTLE_MS) {
+          lastPost = now;
+          ctx.postMessage({ type: 'progress', completed, total });
+        }
+      },
+    }),
+  );
 
   ctx.postMessage({ type: 'result', grid }, [grid.hours.buffer]);
 };

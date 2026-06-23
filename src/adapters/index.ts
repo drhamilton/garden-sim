@@ -7,3 +7,6 @@ export {
   SupersededError,
   isSupersededError,
 } from './worker/worker-sun-hours-port';
+export { createPerfHud, perfEnabled } from './perf/perf-hud';
+export type { PerfHud, HeatmapStats } from './perf/perf-hud';
+export { recordSpan, measureSync } from './perf/user-timing';

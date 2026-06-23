@@ -9,6 +9,7 @@
 
 import type {
   Garden,
+  GardenObject,
   GardenObjectKind,
   GardenObjectPatch,
   SunAtDateTime,
@@ -35,7 +36,10 @@ import {
   SunCalcSolarPosition,
   ThreeOrthographicRenderer,
   WorkerSunHoursPort,
+  createPerfHud,
   isSupersededError,
+  perfEnabled,
+  recordSpan,
 } from './adapters';
 
 // --- Fixed scene inputs ------------------------------------------------------
@@ -147,6 +151,69 @@ const SCENES: Array<{ name: string; description: string; garden: Garden }> = [
   },
 ];
 
+// Large synthetic gardens for measuring performance, added only when `?perf`
+// is set so they never clutter the normal scene list. The 48² scrubs smoothly
+// (use it to confirm the UI stays responsive while a heatmap computes off-thread);
+// the 100² is the design ceiling for the heatmap budget number in the HUD —
+// scrubbing it is renderer-bound (10k un-instanced tiles), so the offline
+// `sun-hours.bench` remains the authoritative ceiling timing.
+if (perfEnabled()) {
+  SCENES.push(
+    {
+      name: 'Perf 48²',
+      description: 'Smooth-scrubbing stress grid — responsiveness check.',
+      garden: perfGarden(48),
+    },
+    {
+      name: 'Perf 100²',
+      description: 'Design-ceiling grid (~10k tiles) — heatmap budget check.',
+      garden: perfGarden(100),
+    },
+  );
+}
+
+/** A square stress garden of `size`² tiles with a few blockers, so rays march. */
+function perfGarden(size: number): Garden {
+  const corner = Math.max(2, Math.round(size * 0.2));
+  const canopy = Math.max(2, Math.round(size * 0.08));
+  const objects: GardenObject[] = [
+    {
+      kind: 'building',
+      footprint: { x: 0, y: 0, width: corner, depth: corner },
+      baseLevel: 0,
+      heightM: 8,
+    },
+    {
+      kind: 'fence',
+      footprint: { x: 0, y: Math.round(size / 2), width: size, depth: 1 },
+      baseLevel: 0,
+      heightM: 2.5,
+    },
+    {
+      kind: 'tree',
+      footprint: {
+        x: Math.round(size * 0.6),
+        y: Math.round(size * 0.6),
+        width: canopy,
+        depth: canopy,
+      },
+      baseLevel: 0,
+      heightM: 6,
+      transmittance: 0.4,
+      canopyBaseM: 2,
+    },
+  ];
+  return {
+    width: size,
+    depth: size,
+    groundLevels: new Array(size * size).fill(0),
+    objects,
+    northRotation: 0,
+    latitude: DEFAULT_LOCATION.latitude,
+    longitude: DEFAULT_LOCATION.longitude,
+  };
+}
+
 let activeScene = 0;
 let garden: Garden = SCENES[activeScene]!.garden;
 
@@ -160,6 +227,9 @@ const renderer = new ThreeOrthographicRenderer(canvas);
 // Heatmap aggregation runs off the main thread so scrubbing stays smooth while a
 // season-long computation is in flight; the port supersedes stale requests.
 const sunHours = new WorkerSunHoursPort();
+// Optional in-app perf HUD (enabled with ?perf): reports heatmap latency and
+// scrub frame time. Null when disabled, so all its hooks are no-ops.
+const perfHud = perfEnabled() ? createPerfHud() : null;
 
 /** Current date driving both scrub and heatmap modes. */
 let currentDate = '2025-06-21';
@@ -215,6 +285,9 @@ const sunAtDateTime: SunAtDateTime = (date, hour) => {
 };
 
 function renderAtHour(hour: number): void {
+  // Time the whole per-frame cost (shadow pass + scene build + draw) so the perf
+  // HUD reads the true scrub headroom against the 60fps budget.
+  const start = performance.now();
   const sun = sunAtHourOnDate(currentDate, hour);
   // Resolve deciduous trees' seasonal transmittance for the scrubbed date so the
   // instantaneous view matches the season the heatmap would aggregate over.
@@ -227,6 +300,7 @@ function renderAtHour(hour: number): void {
       sunArcForDate(currentDate),
     ),
   );
+  perfHud?.recordScrub(performance.now() - start);
 }
 
 /** One-line summary of what an over-the-window heatmap shows. */
@@ -258,6 +332,8 @@ async function renderHeatmap(startDate: Date, endDate: Date): Promise<void> {
   const noonSun = sunAtDateTime(startDate, 12);
   readout.textContent = 'Computing sun-hours… 0%';
   try {
+    // Time end-to-end (worker compute + transfer) — the real in-browser budget.
+    const start = performance.now();
     const grid = await sunHours.aggregate(
       { garden: requestGarden, samples, dayCount },
       ({ completed, total }) => {
@@ -265,8 +341,18 @@ async function renderHeatmap(startDate: Date, endDate: Date): Promise<void> {
         readout.textContent = `Computing sun-hours… ${percent}%`;
       },
     );
+    const end = performance.now();
     renderer.render(buildHeatmapScene(requestGarden, grid, noonSun));
     readout.textContent = heatmapSummary(startDate, endDate);
+    if (perfHud) {
+      recordSpan('heatmap-aggregate (main)', start, end);
+      perfHud.recordHeatmap({
+        elapsedMs: end - start,
+        width: requestGarden.width,
+        depth: requestGarden.depth,
+        samples: samples.length,
+      });
+    }
   } catch (error) {
     if (isSupersededError(error)) return; // a newer request took over
     readout.textContent = 'Sun-hours computation failed — see console.';
@@ -1021,6 +1107,7 @@ controls.append(
   row4,
   readout,
 );
+if (perfHud) controls.append(perfHud.element);
 canvas.insertAdjacentElement('afterend', controls);
 
 highlightActiveGroundTool();
