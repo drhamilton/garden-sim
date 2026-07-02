@@ -29,35 +29,27 @@ const name = process.argv[2] ?? 'app';
 const outDir = resolve(repoRoot, 'docs/screenshots', name);
 
 // --- The capture plan ------------------------------------------------------
-// Rotation without rebuild (#33): north rotation now bypasses the renderer's
-// rebuild path entirely, so these shots prove the behaviour that path change
-// could have broken — the garden still rotates about its centre while the
-// fixed true-north marker and the sun arc stay put. `drive` picks the
-// building+tree scene so the rotation is unmistakable; the two shots differ
-// only in the north slider's angle.
+// Heatmap extremes (#37): after a sun-hours aggregation the sunniest tiles get
+// a white ring and the shadiest a cyan ring. `drive` picks the SW corner block
+// scene (a strong sun/shade gradient, so the extremes are unambiguous). Shot 1
+// runs a single-day heatmap and captures the rings; shot 2 switches back to
+// scrub mode to show the rings belong to the heatmap only.
 
-/** Selects a scene with obstacles so the rotation reads clearly. */
+/** Selects a scene with a hard shade gradient so the extremes read clearly. */
 async function drive(page) {
-  await clickButton(page, 'Building + tree');
+  await clickButton(page, 'SW corner block');
   await page.waitForTimeout(200);
 }
 
 const SHOTS = [
-  { date: '2025-06-21', hour: 10, northDeg: 0, name: 'north-0' },
-  { date: '2025-06-21', hour: 10, northDeg: 45, name: 'north-45' },
+  { date: '2025-06-21', mode: 'heatmap', name: 'heatmap-extreme-rings' },
+  {
+    date: '2025-06-21',
+    hour: 10,
+    before: (page) => clickButton(page, 'Scrub the day'),
+    name: 'scrub-mode-no-rings',
+  },
 ];
-
-/** Sets the north-rotation slider (degrees) and renders synchronously. */
-async function setNorthRotation(page, deg) {
-  await page.evaluate((d) => {
-    const label = [...document.querySelectorAll('label')].find((l) =>
-      l.textContent.startsWith('North'),
-    );
-    const input = label.querySelector('input[type=range]');
-    input.value = String(d);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  }, deg);
-}
 // ---------------------------------------------------------------------------
 
 async function main() {
@@ -85,21 +77,31 @@ async function main() {
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
 
+      // Keep the WebGL drawing buffer around after compositing so frames that
+      // land asynchronously (e.g. a heatmap arriving from the worker) can be
+      // read with toDataURL outside the task that rendered them.
+      await page.addInitScript(() => {
+        const original = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+          if (type === 'webgl' || type === 'webgl2')
+            attrs = { ...attrs, preserveDrawingBuffer: true };
+          return original.call(this, type, attrs);
+        };
+      });
+
       await page.goto(BASE_URL, { waitUntil: 'networkidle' });
       await page.waitForSelector('canvas');
       await drive(page);
 
       for (const shot of SHOTS) {
-        if (shot.northDeg != null) await setNorthRotation(page, shot.northDeg);
-        await captureScrubFrame(
-          page,
-          shot.date,
-          shot.hour,
-          `${outDir}/${shot.name}.png`,
-        );
-        console.log(
-          `captured ${name}/${shot.name}.png @ ${shot.date} ${shot.hour}:00`,
-        );
+        if (shot.before) await shot.before(page);
+        const path = `${outDir}/${shot.name}.png`;
+        if (shot.mode === 'heatmap') {
+          await captureHeatmapFrame(page, shot.date, path);
+        } else {
+          await captureScrubFrame(page, shot.date, shot.hour, path);
+        }
+        console.log(`captured ${name}/${shot.name}.png @ ${shot.date}`);
       }
 
       if (errors.length) {
@@ -131,6 +133,32 @@ async function captureScrubFrame(page, date, hour, path) {
     slider.dispatchEvent(new Event('input', { bubbles: true })); // sync render
     return document.querySelector('canvas').toDataURL('image/png');
   }, hour);
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+  writeFileSync(path, Buffer.from(base64, 'base64'));
+}
+
+/**
+ * Sets the date, runs a single-day sun-hours heatmap, and writes the rendered
+ * frame to `path` once the aggregation lands (the readout switches from the
+ * progress counter to the "Avg sun-hours…" summary). Relies on the
+ * preserveDrawingBuffer init script above, since the heatmap frame is drawn in
+ * a worker-completion task we can't join.
+ */
+async function captureHeatmapFrame(page, date, path) {
+  await page.evaluate((d) => {
+    const picker = document.querySelector('#garden-date');
+    picker.value = d;
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+  }, date);
+  await clickButton(page, 'Show sun-hours heatmap');
+  await page.waitForFunction(
+    () => document.body.textContent.includes('Avg sun-hours/day'),
+    undefined,
+    { timeout: 30_000 },
+  );
+  const dataUrl = await page.evaluate(() =>
+    document.querySelector('canvas').toDataURL('image/png'),
+  );
   const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
   writeFileSync(path, Buffer.from(base64, 'base64'));
 }

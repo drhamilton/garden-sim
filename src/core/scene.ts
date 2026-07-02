@@ -29,6 +29,13 @@ export interface SceneTile {
   sunHours?: number;
   /** Heatmap mode: packed 0xRRGGBB heatmap colour, ramped by sun-hours. */
   colorHex?: number;
+  /**
+   * Heatmap mode: marks this tile as an extreme of the aggregation — the
+   * sunniest or shadiest active tile. Ties are all marked. Omitted when every
+   * active tile is equal (highlighting the whole grid would mislead), on
+   * erased tiles, and always in the instantaneous scrub view.
+   */
+  highlight?: 'sunniest' | 'shadiest';
 }
 
 export interface SceneObject {
@@ -105,15 +112,52 @@ export function buildHeatmapScene(
   const minHours = Math.min(...grid.hours);
   const maxHours = Math.max(...grid.hours);
   const range = maxHours - minHours;
+  const extremes = activeExtremes(garden, grid);
   return sceneFor(garden, sun, (idx) => {
     const sunHours = grid.hours[idx] ?? 0;
     const fraction = range > EPSILON ? (sunHours - minHours) / range : 1;
+    const highlight =
+      extremes && isTileActive(garden, idx)
+        ? highlightFor(sunHours, extremes)
+        : undefined;
     return {
       lit: sunHours > 0,
       sunHours,
       colorHex: rampColor(fraction),
+      ...(highlight !== undefined && { highlight }),
     };
   });
+}
+
+/**
+ * The extreme average sun-hours among the garden's active tiles, or null when
+ * they don't span a real range — with every active tile (effectively) equal
+ * there is no sunniest or shadiest spot to point at, so highlights are
+ * suppressed rather than crowning the whole grid (or one tile as both).
+ */
+function activeExtremes(
+  garden: Garden,
+  grid: SunHoursGrid,
+): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (let idx = 0; idx < grid.hours.length; idx++) {
+    if (!isTileActive(garden, idx)) continue;
+    const hours = grid.hours[idx]!;
+    if (hours < min) min = hours;
+    if (hours > max) max = hours;
+  }
+  return max - min > EPSILON ? { min, max } : null;
+}
+
+/** Which extreme (if either) a tile's sun-hours sit at, within tolerance. */
+function highlightFor(
+  sunHours: number,
+  extremes: { min: number; max: number },
+): SceneTile['highlight'] {
+  if (sunHours >= extremes.max - EPSILON) return 'sunniest';
+  if (sunHours <= extremes.min + EPSILON) return 'shadiest';
+  return undefined;
 }
 
 const EPSILON = 1e-9;
