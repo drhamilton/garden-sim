@@ -249,15 +249,16 @@ This is what makes scrubbing cheap: time-of-day doesn't change the structure key
 so every scrub frame takes the `updateTileColors` path — two buffer uploads and
 one draw call, no allocation.
 
-### Open follow-up (#33)
+### Follow-up: rotation skips the rebuild (#33, shipped)
 
-The structure key currently includes `northRotation`, so **dragging the
-north-rotation slider re-runs `rebuild` every tick** — even though rotation only
-changes the group's parent transform, not any per-tile data. Post-#31 a rebuild
-is cheap enough that this feels fine, but it's still unnecessary work. [Issue
-#33](https://github.com/drhamilton/garden-sim/issues/33) drops `northRotation`
-from the key (applying the group rotation on the per-frame path instead) so
-rotation skips the rebuild entirely.
+The structure key originally included `northRotation`, so **dragging the
+north-rotation slider re-ran `rebuild` every tick** — even though rotation only
+changes the group's parent transform, not any per-tile data. [Issue
+#33](https://github.com/drhamilton/garden-sim/issues/33) dropped `northRotation`
+from the key and applies the group rotation on the per-frame path instead, so
+rotation takes the `updateTileColors` path like scrubbing does. On the
+`Perf 100²` scene under software GL, a rotation tick fell from 28.7ms median
+(over the 16.7ms scrub budget) to 2.4ms.
 
 ---
 

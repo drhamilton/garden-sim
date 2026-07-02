@@ -50,7 +50,10 @@ function seasonBounds(d: Date): { start: Date; end: Date } {
   const y = d.getUTCFullYear();
   const seasons: Array<{ start: Date; end: Date }> = [
     // Winter (prev year Dec 21 – Mar 19)
-    { start: new Date(Date.UTC(y - 1, 11, 21)), end: new Date(Date.UTC(y, 2, 19)) },
+    {
+      start: new Date(Date.UTC(y - 1, 11, 21)),
+      end: new Date(Date.UTC(y, 2, 19)),
+    },
     // Spring (Mar 20 – Jun 20)
     { start: new Date(Date.UTC(y, 2, 20)), end: new Date(Date.UTC(y, 5, 20)) },
     // Summer (Jun 21 – Sep 22)
@@ -58,10 +61,16 @@ function seasonBounds(d: Date): { start: Date; end: Date } {
     // Autumn (Sep 23 – Dec 20)
     { start: new Date(Date.UTC(y, 8, 23)), end: new Date(Date.UTC(y, 11, 20)) },
     // Winter (Dec 21 – next Mar 19)
-    { start: new Date(Date.UTC(y, 11, 21)), end: new Date(Date.UTC(y + 1, 2, 19)) },
+    {
+      start: new Date(Date.UTC(y, 11, 21)),
+      end: new Date(Date.UTC(y + 1, 2, 19)),
+    },
   ];
   const t = d.getTime();
-  return seasons.find((s) => t >= s.start.getTime() && t <= s.end.getTime()) ?? seasons[1]!;
+  return (
+    seasons.find((s) => t >= s.start.getTime() && t <= s.end.getTime()) ??
+    seasons[1]!
+  );
 }
 
 /** 30 days after `date`, as an ISO date string (for default custom-range init). */
