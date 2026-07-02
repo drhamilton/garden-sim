@@ -141,6 +141,10 @@ export class ThreeOrthographicRenderer implements RendererPort {
     } else {
       this.updateTileColors(scene);
     }
+    // North rotation is a parent transform on the group, deliberately absent
+    // from the structure key: applied here per frame, a rotation-only change
+    // takes the cheap recolour path above instead of a full rebuild.
+    this.group.rotation.y = -scene.camera.northRotation;
     this.updateSun(scene);
     this.renderer.render(this.scene, this.camera);
   }
@@ -164,7 +168,9 @@ export class ThreeOrthographicRenderer implements RendererPort {
           `${o.kind}:${o.footprint.x},${o.footprint.y},${o.footprint.width},${o.footprint.depth}:${o.baseElevationM}:${o.heightM}`,
       )
       .join('|');
-    return `${scene.width}x${scene.depth}:${scene.camera.northRotation}:${objKey}`;
+    // North rotation is deliberately excluded: it's applied per frame in
+    // render() as a group transform, so it must not force a rebuild.
+    return `${scene.width}x${scene.depth}:${objKey}`;
   }
 
   private rebuild(scene: SceneDescription): void {
@@ -231,9 +237,8 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
     // Sit the group at the grid centre so its local origin (the rotation pivot)
     // coincides with the garden's middle; net world positions are unchanged at
-    // zero rotation. Then orient to true north and frame the camera.
+    // zero rotation. The north orientation itself is set per frame in render().
     this.group.position.set(cx, 0, cz);
-    this.group.rotation.y = -scene.camera.northRotation;
     this.rebuildNorthIndicator(scene);
     this.frameCamera(scene);
   }
