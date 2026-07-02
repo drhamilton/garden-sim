@@ -83,3 +83,66 @@ describe('buildHeatmapScene — sun-hours heatmap scene description', () => {
     expect(() => JSON.stringify(scene)).not.toThrow();
   });
 });
+
+describe('buildHeatmapScene — sunniest/shadiest highlights', () => {
+  it('marks the sunniest and shadiest tiles', () => {
+    const { garden, grid } = gridStrip([2, 5, 8]);
+    const scene = buildHeatmapScene(garden, grid, NOON);
+
+    expect(scene.tiles.map((t) => t.highlight)).toEqual([
+      'shadiest',
+      undefined,
+      'sunniest',
+    ]);
+  });
+
+  it('highlights every tied extreme, not an arbitrary one', () => {
+    const { garden, grid } = gridStrip([8, 2, 8, 2, 5]);
+    const scene = buildHeatmapScene(garden, grid, NOON);
+
+    expect(scene.tiles.map((t) => t.highlight)).toEqual([
+      'sunniest',
+      'shadiest',
+      'sunniest',
+      'shadiest',
+      undefined,
+    ]);
+  });
+
+  it('ignores erased tiles when finding the extremes', () => {
+    const { garden, grid } = gridStrip([0, 4, 8]);
+    // Erase the shadiest and the sunniest tile; the middle one is both extremes
+    // of what remains — but with only one distinct value left, highlights are
+    // suppressed rather than crowning a single tile both sunniest and shadiest.
+    const erased = { ...garden, active: [false, true, false] };
+    const scene = buildHeatmapScene(erased, grid, NOON);
+    expect(scene.tiles.every((t) => t.highlight === undefined)).toBe(true);
+
+    // With two distinct active values, the erased extreme (idx 0, 0 hours)
+    // no longer claims "shadiest" — the shadiest *active* tile does.
+    const partly = { ...garden, active: [false, true, true] };
+    const partlyScene = buildHeatmapScene(partly, grid, NOON);
+    expect(partlyScene.tiles.map((t) => t.highlight)).toEqual([
+      undefined,
+      'shadiest',
+      'sunniest',
+    ]);
+  });
+
+  it('suppresses highlights when every active tile is equal', () => {
+    const { garden, grid } = gridStrip([3, 3, 3]);
+    const scene = buildHeatmapScene(garden, grid, NOON);
+    expect(scene.tiles.every((t) => t.highlight === undefined)).toBe(true);
+  });
+
+  it('never highlights in the instantaneous scrub scene', async () => {
+    const { buildScene } = await import('./scene');
+    const { garden } = gridStrip([0, 0, 0]);
+    const scene = buildScene(
+      garden,
+      { width: 3, depth: 1, fraction: Float64Array.from([0, 0.5, 1]) },
+      NOON,
+    );
+    expect(scene.tiles.every((t) => t.highlight === undefined)).toBe(true);
+  });
+});

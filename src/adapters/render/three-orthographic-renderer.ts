@@ -22,11 +22,13 @@ import {
   Line,
   LineBasicMaterial,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   OrthographicCamera,
   PlaneGeometry,
   Raycaster,
+  RingGeometry,
   Scene,
   Sprite,
   SpriteMaterial,
@@ -49,6 +51,13 @@ const OBJECT_COLORS: Record<string, number> = {
 };
 
 const TILE_GAP = 0.04; // fraction of a tile left as a grid seam
+
+// Heatmap-extreme highlight rings (SceneTile.highlight). White reads as
+// "brightest spot" on the sun-yellow end of the ramp; cyan reads cool against
+// the shadow-blue end — each contrasts with both.
+const HIGHLIGHT_COLORS = { sunniest: 0xffffff, shadiest: 0x4cc9f0 } as const;
+const HIGHLIGHT_RING_INNER = 0.3; // tile units
+const HIGHLIGHT_RING_OUTER = 0.44;
 
 // North-marker placement, as fractions of the garden span / world units. The
 // arrow base sits beyond the grid's circumscribed circle (half-diagonal ≈
@@ -117,6 +126,20 @@ export class ThreeOrthographicRenderer implements RendererPort {
   /** The grid coordinate each instance stands for, indexed by `instanceId`. */
   private tileCoords: { x: number; y: number }[] = [];
   private structureKey = '';
+  /**
+   * Rings circling the heatmap's sunniest/shadiest tiles. Lives inside `group`
+   * so the rings turn with the garden. Ring meshes share one geometry and the
+   * per-kind materials below; only positions are per-ring.
+   */
+  private readonly highlightGroup = new Group();
+  private readonly highlightRing = new RingGeometry(
+    HIGHLIGHT_RING_INNER,
+    HIGHLIGHT_RING_OUTER,
+    32,
+  );
+  private readonly highlightMaterials = makeHighlightMaterials();
+  /** Key of the highlight set last drawn; rings are rebuilt only on change. */
+  private highlightKey = '';
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
@@ -124,6 +147,8 @@ export class ThreeOrthographicRenderer implements RendererPort {
     this.scene.background = new Color(0x10141c);
 
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+    this.highlightRing.rotateX(-Math.PI / 2); // lie flat on the tiles
+    this.group.add(this.highlightGroup);
     this.scene.add(this.group);
     this.scene.add(this.northIndicator);
     this.scene.add(this.sunArcLine);
@@ -145,12 +170,16 @@ export class ThreeOrthographicRenderer implements RendererPort {
     // from the structure key: applied here per frame, a rotation-only change
     // takes the cheap recolour path above instead of a full rebuild.
     this.group.rotation.y = -scene.camera.northRotation;
+    this.updateHighlights(scene);
     this.updateSun(scene);
     this.renderer.render(this.scene, this.camera);
   }
 
   dispose(): void {
     this.disposeGroup();
+    this.highlightRing.dispose();
+    for (const material of Object.values(this.highlightMaterials))
+      material.dispose();
     this.clearNorthIndicator();
     this.sunArcLine.geometry.dispose();
     this.sunArcLine.material.dispose();
@@ -175,6 +204,11 @@ export class ThreeOrthographicRenderer implements RendererPort {
 
   private rebuild(scene: SceneDescription): void {
     this.disposeGroup();
+    // disposeGroup empties `group`, so re-adopt the (persistent) highlight
+    // layer and force updateHighlights to re-place rings against the new grid.
+    this.highlightGroup.clear();
+    this.highlightKey = '';
+    this.group.add(this.highlightGroup);
     this.tileMesh = null;
     this.tileOpacity = null;
     this.tileCoords = [];
@@ -376,6 +410,40 @@ export class ThreeOrthographicRenderer implements RendererPort {
     return this.tileCoords[hit.instanceId] ?? null;
   }
 
+  /**
+   * (Re)draws the rings circling the heatmap's sunniest/shadiest tiles. The
+   * highlight set only changes when a new aggregation lands (and is empty in
+   * scrub mode), so ring meshes are rebuilt solely when the set differs from
+   * what's drawn — scrub frames pay one string compare. Rings ignore depth so
+   * a highlighted tile behind a tall object still shows.
+   */
+  private updateHighlights(scene: SceneDescription): void {
+    const highlighted = scene.tiles.filter((tile) => tile.highlight);
+    const key = highlighted
+      .map((tile) => `${tile.x},${tile.y},${tile.elevationM}:${tile.highlight}`)
+      .join('|');
+    if (key === this.highlightKey) return;
+    this.highlightKey = key;
+    this.highlightGroup.clear();
+
+    // Same centre-relative layout as the tile instances in rebuild().
+    const cx = scene.width / 2;
+    const cz = scene.depth / 2;
+    for (const tile of highlighted) {
+      const ring = new Mesh(
+        this.highlightRing,
+        this.highlightMaterials[tile.highlight!],
+      );
+      ring.position.set(
+        tile.x + 0.5 - cx,
+        tile.elevationM / scene.tileSizeM + 0.02,
+        tile.y + 0.5 - cz,
+      );
+      ring.renderOrder = 998; // above tiles/objects, below the north marker (999)
+      this.highlightGroup.add(ring);
+    }
+  }
+
   private updateSun(scene: SceneDescription): void {
     const { azimuth, elevation } = scene.sun;
     const e = Math.max(elevation, 0.05);
@@ -485,6 +553,19 @@ export class ThreeOrthographicRenderer implements RendererPort {
       }
     }
   }
+}
+
+/** One unlit, depth-ignoring material per highlight kind, shared by all rings. */
+function makeHighlightMaterials(): Record<
+  'sunniest' | 'shadiest',
+  MeshBasicMaterial
+> {
+  const make = (color: number) =>
+    new MeshBasicMaterial({ color, depthTest: false, transparent: true });
+  return {
+    sunniest: make(HIGHLIGHT_COLORS.sunniest),
+    shadiest: make(HIGHLIGHT_COLORS.shadiest),
+  };
 }
 
 /**
