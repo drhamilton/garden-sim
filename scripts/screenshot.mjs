@@ -29,26 +29,35 @@ const name = process.argv[2] ?? 'app';
 const outDir = resolve(repoRoot, 'docs/screenshots', name);
 
 // --- The capture plan ------------------------------------------------------
-// Sun sky-dome day-arc (#27): the sun's daily path is drawn as a faint arc
-// across the sky, and the marker rides it at the scrubbed time. We capture the
-// open garden on the summer solstice at three times — low morning sun, high
-// noon sun, low evening sun — so the arc reads as a fixed path while the marker
-// moves along it, and a dawn/dusk sun reads as low *in the sky* (early/late on
-// the arc) rather than sitting on the ground beside the model. `drive` selects
-// the obstacle-free scene so nothing competes with the arc; each shot sets the
-// date and time-of-day and captures the rendered frame.
+// Rotation without rebuild (#33): north rotation now bypasses the renderer's
+// rebuild path entirely, so these shots prove the behaviour that path change
+// could have broken — the garden still rotates about its centre while the
+// fixed true-north marker and the sun arc stay put. `drive` picks the
+// building+tree scene so the rotation is unmistakable; the two shots differ
+// only in the north slider's angle.
 
-/** Selects the open-garden scene; the scrub view stays in instantaneous mode. */
+/** Selects a scene with obstacles so the rotation reads clearly. */
 async function drive(page) {
-  await clickButton(page, 'Open garden');
+  await clickButton(page, 'Building + tree');
   await page.waitForTimeout(200);
 }
 
 const SHOTS = [
-  { date: '2025-06-21', hour: 6, name: 'morning-low-sun' },
-  { date: '2025-06-21', hour: 12, name: 'noon-high-sun' },
-  { date: '2025-06-21', hour: 18, name: 'evening-low-sun' },
+  { date: '2025-06-21', hour: 10, northDeg: 0, name: 'north-0' },
+  { date: '2025-06-21', hour: 10, northDeg: 45, name: 'north-45' },
 ];
+
+/** Sets the north-rotation slider (degrees) and renders synchronously. */
+async function setNorthRotation(page, deg) {
+  await page.evaluate((d) => {
+    const label = [...document.querySelectorAll('label')].find((l) =>
+      l.textContent.startsWith('North'),
+    );
+    const input = label.querySelector('input[type=range]');
+    input.value = String(d);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, deg);
+}
 // ---------------------------------------------------------------------------
 
 async function main() {
@@ -81,6 +90,7 @@ async function main() {
       await drive(page);
 
       for (const shot of SHOTS) {
+        if (shot.northDeg != null) await setNorthRotation(page, shot.northDeg);
         await captureScrubFrame(
           page,
           shot.date,
